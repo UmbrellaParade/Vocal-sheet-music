@@ -17,6 +17,7 @@ import {
   Play,
   Plus,
   Printer,
+  QrCode,
   RotateCcw,
   Save,
   Share2,
@@ -30,6 +31,7 @@ import {
   Upload,
   Wand2
 } from "lucide-react";
+import * as QRCode from "qrcode";
 import {
   useCallback,
   useEffect,
@@ -38,11 +40,7 @@ import {
   useState
 } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
-import {
-  roughHiragana,
-  splitTextForPlacement,
-  toVowels
-} from "@/lib/japanese";
+import { roughHiragana, toVowels } from "@/lib/japanese";
 
 type ToolId =
   | "lyric"
@@ -86,6 +84,8 @@ type SheetItem = {
   comment?: string;
   pitch?: number;
   durationTicks?: number;
+  width?: number;
+  align?: "left" | "center";
 };
 
 type SheetMeta = {
@@ -356,6 +356,9 @@ const SYSTEMS = [
   { top: 69, height: 9.8 },
   { top: 81.2, height: 9.8 }
 ];
+
+const LYRIC_LINE_X = 18;
+const LYRIC_LINE_WIDTH = 70;
 
 const SCORE_SCROLL_START = SYSTEMS[0].top;
 const SCORE_SCROLL_END =
@@ -632,6 +635,24 @@ function normalizeDigits(value: string) {
   return value.replace(/[０-９]/g, (character) =>
     String.fromCharCode(character.charCodeAt(0) - 0xfee0)
   );
+}
+
+function splitLinesForPlacement(input: string) {
+  return input
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function getLyricPlacementY(
+  system: (typeof SYSTEMS)[number],
+  toolId: Extract<ToolId, "lyric" | "vowel">,
+  layoutMode: SheetLayoutMode
+) {
+  const baseRatio = layoutMode === "staff" ? 0.86 : 0.8;
+  const vowelOffset = layoutMode === "staff" ? 0.07 : 0.1;
+  const laneRatio = toolId === "vowel" ? baseRatio + vowelOffset : baseRatio;
+  return system.top + system.height * laneRatio;
 }
 
 function getSectionNumber(sectionName: string) {
@@ -1089,6 +1110,8 @@ export default function Home() {
     DEFAULT_PINNED_DICTION_MARKS
   );
   const [sharePayload, setSharePayload] = useState("");
+  const [shareUrl, setShareUrl] = useState("");
+  const [shareQrCode, setShareQrCode] = useState("");
   const [sunoText, setSunoText] = useState("");
   const [autoScrollSettings, setAutoScrollSettings] =
     useState<AutoScrollSettings>(DEFAULT_AUTO_SCROLL_SETTINGS);
@@ -1360,6 +1383,9 @@ export default function Home() {
     });
     setSunoText(nextDraft.sunoText ?? "");
     setMidiMeasuresPerRow(nextDraft.midiMeasuresPerRow ?? "4");
+    setSharePayload("");
+    setShareUrl("");
+    setShareQrCode("");
     setIsAutoScrolling(false);
     setAutoScrollElapsed(0);
     setSelectedId("");
@@ -1399,8 +1425,8 @@ export default function Home() {
 
   const placeTextOnSheet = useCallback(
     (text: string, toolId: Extract<ToolId, "lyric" | "vowel">) => {
-      const rows = splitTextForPlacement(text);
-      if (!rows.length) {
+      const lines = splitLinesForPlacement(text);
+      if (!lines.length) {
         setStatus("配置するテキストなし");
         return;
       }
@@ -1408,32 +1434,31 @@ export default function Home() {
       const tool = TOOL_BY_ID[toolId];
       const placedItems: SheetItem[] = [];
 
-      rows.slice(0, SYSTEMS.length).forEach((tokens, rowIndex) => {
+      lines.slice(0, SYSTEMS.length).forEach((line, rowIndex) => {
         const system = SYSTEMS[rowIndex];
-        const y =
-          toolId === "vowel"
-            ? system.top + system.height - 0.5
-            : system.top + system.height - 3;
-        const denominator = Math.max(tokens.length - 1, 1);
-
-        tokens.forEach((token, tokenIndex) => {
-          placedItems.push({
-            id: createId(),
-            toolId,
-            label: token,
-            x: tokens.length === 1 ? 50 : 10 + (80 * tokenIndex) / denominator,
-            y,
-            size: tool.size,
-            color: tool.color
-          });
+        placedItems.push({
+          id: createId(),
+          toolId,
+          label: line,
+          x: LYRIC_LINE_X,
+          y: getLyricPlacementY(system, toolId, sheetLayoutMode),
+          size: tool.size,
+          color: tool.color,
+          width: LYRIC_LINE_WIDTH,
+          align: "left"
         });
       });
 
       setItems((current) => [...current, ...placedItems]);
       setSelectedId(placedItems.at(-1)?.id ?? "");
-      setStatus(`${tool.name}を配置`);
+      const skippedLineCount = lines.length - placedItems.length;
+      setStatus(
+        `${tool.name}を${placedItems.length}行配置${
+          skippedLineCount > 0 ? ` / 未配置${skippedLineCount}行` : ""
+        }`
+      );
     },
-    []
+    [sheetLayoutMode]
   );
 
   const convertToReading = useCallback(async () => {
@@ -2119,10 +2144,21 @@ export default function Home() {
     );
   };
 
+  const createShareSnapshot = () => {
+    const payload = encodeShareData(draft);
+    const url = `${window.location.origin}${window.location.pathname}#share=${encodeURIComponent(
+      payload
+    )}`;
+    setSharePayload(payload);
+    setShareUrl(url);
+    setShareQrCode("");
+
+    return { payload, url };
+  };
+
   const createSharePayload = async () => {
     try {
-      const payload = encodeShareData(draft);
-      setSharePayload(payload);
+      const { payload } = createShareSnapshot();
       await navigator.clipboard?.writeText(payload);
       setStatus("共有コードをコピーしました");
     } catch {
@@ -2132,11 +2168,7 @@ export default function Home() {
 
   const createShareUrl = async () => {
     try {
-      const payload = encodeShareData(draft);
-      const url = `${window.location.origin}${window.location.pathname}#share=${encodeURIComponent(
-        payload
-      )}`;
-      setSharePayload(payload);
+      const { url } = createShareSnapshot();
 
       if (navigator.share) {
         await navigator.share({ title: meta.title, text: url, url });
@@ -2147,6 +2179,27 @@ export default function Home() {
       setStatus("共有リンクを用意しました");
     } catch {
       setStatus("共有リンクを作れませんでした");
+    }
+  };
+
+  const createShareQrCode = async () => {
+    try {
+      const { url } = createShareSnapshot();
+      const dataUrl = await QRCode.toDataURL(url, {
+        errorCorrectionLevel: "M",
+        margin: 1,
+        width: 220,
+        color: {
+          dark: "#0f172a",
+          light: "#ffffff"
+        }
+      });
+      setShareQrCode(dataUrl);
+      setStatus("QRコードを作成しました");
+    } catch {
+      setStatus(
+        "QRコードを作れませんでした。リンクが長い場合は共有コードを使ってください"
+      );
     }
   };
 
@@ -2372,7 +2425,9 @@ export default function Home() {
                 <button
                   type="button"
                   className="wide-button"
-                  onClick={() => placeTextOnSheet(readingLyrics, "lyric")}
+                  onClick={() =>
+                    placeTextOnSheet(readingLyrics || sourceLyrics, "lyric")
+                  }
                 >
                   <Plus size={16} />
                   <span>歌詞を配置</span>
@@ -2390,7 +2445,12 @@ export default function Home() {
                 <button
                   type="button"
                   className="wide-button"
-                  onClick={() => placeTextOnSheet(vowelLyrics, "vowel")}
+                  onClick={() =>
+                    placeTextOnSheet(
+                      vowelLyrics || toVowels(roughHiragana(sourceLyrics)),
+                      "vowel"
+                    )
+                  }
                 >
                   <Plus size={16} />
                   <span>母音を配置</span>
@@ -2803,7 +2863,34 @@ export default function Home() {
                     <Share2 size={16} />
                     <span>リンク</span>
                   </button>
+                  <button
+                    type="button"
+                    className="control-button"
+                    onClick={() => void createShareQrCode()}
+                  >
+                    <QrCode size={16} />
+                    <span>QR</span>
+                  </button>
                 </div>
+                {shareUrl && (
+                  <>
+                    <label className="field-label" htmlFor="shareUrl">
+                      共有リンク
+                    </label>
+                    <input
+                      id="shareUrl"
+                      value={shareUrl}
+                      readOnly
+                      onFocus={(event) => event.currentTarget.select()}
+                    />
+                  </>
+                )}
+                {shareQrCode && (
+                  <div className="qr-share-box">
+                    <img src={shareQrCode} alt="共有リンクのQRコード" />
+                    <span>スマホで読み取って共有リンクを開けます</span>
+                  </div>
+                )}
                 <label className="field-label" htmlFor="sharePayload">
                   共有コード
                 </label>
@@ -2994,14 +3081,23 @@ export default function Home() {
                   top: `${item.y}%`,
                   fontSize: `${item.size}px`,
                   "--item-color": item.color,
-                  "--highlight-color": item.highlightColor ?? "transparent"
+                  "--highlight-color": item.highlightColor ?? "transparent",
+                  ...(item.width
+                    ? {
+                        width: `${item.width}%`,
+                        maxWidth: `${item.width}%`
+                      }
+                    : {}),
+                  textAlign: item.align ?? "center"
                 } as CSSProperties;
 
                 return (
                   <button
                     key={item.id}
                     type="button"
-                    className={`sheet-item sheet-${tool.kind} tool-${item.toolId} ${
+                    className={`sheet-item sheet-${tool.kind} tool-${item.toolId} align-${
+                      item.align ?? "center"
+                    } ${
                       selectedId === item.id ? "selected" : ""
                     } ${item.highlightColor ? "has-highlight" : ""} ${
                       item.comment ? "has-comment" : ""

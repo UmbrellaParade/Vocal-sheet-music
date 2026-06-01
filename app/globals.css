@@ -329,6 +329,30 @@ button:focus-visible {
   line-height: 1.45;
 }
 
+.qr-share-box {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  margin: 12px 0 4px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.qr-share-box img {
+  width: 180px;
+  height: 180px;
+  image-rendering: pixelated;
+}
+
+.qr-share-box span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+}
+
 .audio-controls {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -1004,6 +1028,10 @@ kbd {
   touch-action: none;
 }
 
+.sheet-item.align-left {
+  transform: translateY(-50%);
+}
+
 .item-content {
   position: relative;
   z-index: 1;
@@ -1040,9 +1068,26 @@ kbd {
   color: var(--item-color);
   background: transparent;
   font-weight: 700;
+  writing-mode: horizontal-tb;
+  text-orientation: mixed;
   text-shadow:
     0 1px 0 rgba(255, 255, 255, 0.92),
     0 0 3px rgba(255, 255, 255, 0.75);
+}
+
+.sheet-text.align-left {
+  min-height: 0;
+  padding: 0 4px;
+  overflow: visible;
+  white-space: pre-wrap;
+  word-break: normal;
+  overflow-wrap: normal;
+  line-height: 1.28;
+}
+
+.sheet-text.align-left .item-content {
+  display: block;
+  width: 100%;
 }
 
 .sheet-text.has-highlight {
