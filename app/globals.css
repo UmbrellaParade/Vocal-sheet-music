@@ -41,6 +41,7 @@ body {
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -50,7 +51,8 @@ button {
 }
 
 textarea,
-input {
+input,
+select {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -66,13 +68,15 @@ textarea {
   line-height: 1.55;
 }
 
-input {
+input,
+select {
   min-height: 38px;
   padding: 8px 10px;
 }
 
 textarea:focus,
 input:focus,
+select:focus,
 button:focus-visible {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.16);
@@ -203,6 +207,14 @@ button:focus-visible {
   transform: translateY(1px);
 }
 
+.icon-button:disabled,
+.control-button:disabled,
+.wide-button:disabled,
+.square-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.46;
+}
+
 .icon-button.primary {
   color: white;
   border-color: var(--accent-strong);
@@ -298,6 +310,53 @@ button:focus-visible {
   font-weight: 700;
 }
 
+.audio-file-name {
+  min-height: 22px;
+  margin: 10px 0 8px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.audio-controls {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.audio-controls button {
+  min-height: 36px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: #0f172a;
+  background: #fff;
+  cursor: pointer;
+}
+
+.audio-controls button:hover {
+  border-color: var(--accent);
+  background: var(--panel-soft);
+}
+
+.audio-slider {
+  margin-top: 10px;
+  accent-color: var(--accent);
+}
+
+.audio-time {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
 .tool-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -383,9 +442,121 @@ button:focus-visible {
   font-size: 22px;
   font-weight: 800;
   line-height: 1;
+  white-space: nowrap;
   text-shadow:
     0 0 8px color-mix(in srgb, var(--tool-color), transparent 22%),
     0 1px 0 #020617;
+}
+
+.tool-button.tool-diction .tool-symbol {
+  font-size: 16px;
+}
+
+.symbol-art {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 1.9em;
+  height: 1.25em;
+  color: currentColor;
+  line-height: 1;
+  filter:
+    drop-shadow(0 0 0.16em rgba(255, 255, 255, 0.9))
+    drop-shadow(0 0 0.28em currentColor);
+}
+
+.symbol-art > span,
+.symbol-art::before,
+.symbol-art::after {
+  content: "";
+  position: absolute;
+  display: block;
+}
+
+.tool-symbol .symbol-art {
+  width: 30px;
+  height: 26px;
+  font-size: 18px;
+}
+
+.symbol-scoop > span {
+  left: 11%;
+  top: 52%;
+  width: 72%;
+  height: 34%;
+  border-bottom: 0.18em solid currentColor;
+  border-right: 0.18em solid currentColor;
+  border-radius: 0 0 1em 0.35em;
+  transform: rotate(-26deg);
+}
+
+.symbol-scoop::after {
+  right: 7%;
+  top: 24%;
+  width: 0.32em;
+  height: 0.32em;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0.22em currentColor;
+}
+
+.symbol-fall > span {
+  left: 8%;
+  top: 24%;
+  width: 82%;
+  height: 78%;
+  border-top: 0.18em solid currentColor;
+  border-radius: 100% 90% 0 0;
+  transform: rotate(10deg);
+}
+
+.symbol-fall::after {
+  right: 5%;
+  bottom: 14%;
+  width: 0.18em;
+  height: 0.18em;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.symbol-vibrato::before {
+  content: "W";
+  left: 50%;
+  top: 50%;
+  color: currentColor;
+  font-family: Arial, "Segoe UI", sans-serif;
+  font-size: 1.15em;
+  font-weight: 900;
+  transform: translate(-50%, -50%) scaleX(1.2);
+}
+
+.symbol-kobushi > span {
+  width: 1.2em;
+  height: 1.02em;
+  border: 0.17em solid currentColor;
+  border-radius: 50%;
+  transform: rotate(-18deg);
+}
+
+.symbol-kobushi::after {
+  right: 10%;
+  top: 12%;
+  width: 0.38em;
+  height: 0.38em;
+  border-radius: 50%;
+  background: #e0faff;
+  box-shadow: 0 0 0.32em currentColor;
+}
+
+.symbol-breath::before {
+  content: "V";
+  left: 50%;
+  top: 50%;
+  color: currentColor;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.24em;
+  font-weight: 900;
+  transform: translate(-50%, -50%) scaleX(1.12);
 }
 
 .tool-name {
@@ -424,7 +595,62 @@ kbd {
   display: grid;
   grid-template-columns: minmax(180px, 1fr) 160px 72px 96px;
   gap: 8px;
+  margin-bottom: 8px;
+}
+
+.sheet-view-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   margin-bottom: 12px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.segmented-control {
+  display: inline-grid;
+  grid-template-columns: repeat(3, minmax(74px, 1fr));
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #f8fafc;
+}
+
+.segmented-control button {
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 5px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.segmented-control button.active {
+  color: #fff;
+  background: var(--accent);
+  box-shadow: 0 4px 12px rgba(8, 145, 178, 0.22);
+}
+
+.toggle-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.toggle-control input {
+  width: 18px;
+  min-height: 18px;
+  padding: 0;
+  accent-color: var(--accent);
 }
 
 .score-stage {
@@ -498,7 +724,7 @@ kbd {
   top: 0;
   height: 28%;
   display: grid;
-  grid-template-columns: 44px repeat(3, 1fr);
+  grid-template-columns: 86px 1fr;
   border-bottom: 1px solid #e2e8f0;
   background: #f8fafc;
 }
@@ -516,15 +742,20 @@ kbd {
 .phrase-row-header span:first-child {
   justify-content: center;
   border-left: 0;
-  color: #0891b2;
-  background: #ecfeff;
+  color: var(--section-color, #0891b2);
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--section-color, #0891b2), white 82%),
+      #f8fafc
+    );
 }
 
 .lyric-writing-lane {
   position: absolute;
-  left: 54px;
+  left: 86px;
   right: 18px;
-  top: 42%;
+  bottom: 9%;
   height: 22%;
   border-bottom: 2px solid #cbd5e1;
   background:
@@ -535,13 +766,38 @@ kbd {
 
 .note-writing-lane {
   position: absolute;
-  left: 54px;
+  left: 86px;
   right: 18px;
-  bottom: 10%;
-  height: 18%;
+  top: 40%;
+  height: 21%;
   border-top: 1px dashed #bae6fd;
   border-bottom: 1px dashed #fde68a;
   background: rgba(240, 249, 255, 0.38);
+}
+
+.lyric-writing-lane::before,
+.note-writing-lane::before {
+  position: absolute;
+  left: -74px;
+  top: 50%;
+  width: 62px;
+  transform: translateY(-50%);
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.note-writing-lane::before {
+  content: "記号メモ";
+}
+
+.lyric-writing-lane::before {
+  content: "歌詞";
+}
+
+.score-page.hide-chords .phrase-row-header span:nth-child(2) {
+  opacity: 0.28;
 }
 
 .sheet-item {
@@ -578,10 +834,16 @@ kbd {
   font-weight: 900;
   background: transparent;
   box-shadow: none;
+  overflow: visible;
   text-shadow:
     0 0 4px rgba(255, 255, 255, 0.75),
     0 0 10px color-mix(in srgb, var(--item-color), transparent 18%),
     0 1px 1px rgba(2, 6, 23, 0.6);
+}
+
+.sheet-symbol .symbol-art {
+  color: var(--item-color);
+  font-size: 1em;
 }
 
 .sheet-text {
@@ -628,8 +890,9 @@ kbd {
 }
 
 .sheet-symbol.tool-diction {
-  min-width: 26px;
+  min-width: max-content;
   letter-spacing: 0;
+  white-space: nowrap;
   -webkit-text-stroke: 0.35px #7c2d12;
 }
 
@@ -692,6 +955,47 @@ kbd {
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 10px;
+}
+
+.section-editor {
+  display: grid;
+  grid-template-columns: 82px minmax(0, 1fr) 40px;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.section-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.section-chips button {
+  --section-color: #0891b2;
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--section-color), white 54%);
+  border-radius: 6px;
+  color: color-mix(in srgb, var(--section-color), #0f172a 22%);
+  background: color-mix(in srgb, var(--section-color), white 88%);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.section-chips button span {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  background: var(--section-color);
+  font-size: 10px;
 }
 
 .chord-presets button,
@@ -834,6 +1138,15 @@ kbd {
     grid-template-columns: 1fr 1fr;
   }
 
+  .sheet-view-controls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .segmented-control {
+    width: 100%;
+  }
+
   .score-stage {
     min-height: auto;
     padding: 10px;
@@ -855,7 +1168,8 @@ kbd {
 
   .topbar,
   .side-panel,
-  .sheet-toolbar {
+  .sheet-toolbar,
+  .sheet-view-controls {
     display: none;
   }
 

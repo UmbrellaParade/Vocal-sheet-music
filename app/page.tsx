@@ -8,11 +8,16 @@ import {
   FolderOpen,
   Keyboard,
   Music2,
+  Pause,
+  Play,
   Plus,
   Printer,
   RotateCcw,
   Save,
   SlidersHorizontal,
+  SkipBack,
+  SkipForward,
+  Square,
   Trash2,
   Type,
   Upload,
@@ -40,6 +45,7 @@ type ToolId =
   | "breath"
   | "scoop"
   | "fall"
+  | "kobushi"
   | "accent"
   | "diction"
   | "hold"
@@ -82,9 +88,27 @@ type DraftData = {
   sourceLyrics: string;
   readingLyrics: string;
   vowelLyrics: string;
+  sections?: SectionEntry[];
+  showChords?: boolean;
+  lyricDisplayMode?: LyricDisplayMode;
 };
 
-type PanelId = "lyrics" | "tools" | "settings" | "inspector" | "cleanup";
+type SectionEntry = {
+  id: string;
+  name: string;
+  rowIndex: number;
+  color: string;
+};
+
+type LyricDisplayMode = "original" | "reading" | "vowel";
+
+type PanelId =
+  | "lyrics"
+  | "audio"
+  | "tools"
+  | "settings"
+  | "inspector"
+  | "cleanup";
 
 const STORAGE_KEY = "vocal-sheet-music:draft:v1";
 
@@ -127,9 +151,9 @@ const SHEET_TOOLS: ToolSpec[] = [
   {
     id: "vibrato",
     name: "ビブラート",
-    label: "〜",
+    label: "W",
     shortcut: "V",
-    color: "#00d4ff",
+    color: "#39ff55",
     size: 30,
     kind: "symbol"
   },
@@ -147,7 +171,7 @@ const SHEET_TOOLS: ToolSpec[] = [
     name: "しゃくり",
     label: "↗",
     shortcut: "S",
-    color: "#4ade80",
+    color: "#ff2d2d",
     size: 28,
     kind: "symbol"
   },
@@ -156,8 +180,17 @@ const SHEET_TOOLS: ToolSpec[] = [
     name: "フォール",
     label: "↘",
     shortcut: "F",
-    color: "#a78bfa",
+    color: "#d946ef",
     size: 28,
+    kind: "symbol"
+  },
+  {
+    id: "kobushi",
+    name: "こぶし",
+    label: "○",
+    shortcut: "U",
+    color: "#22d3ee",
+    size: 30,
     kind: "symbol"
   },
   {
@@ -172,7 +205,7 @@ const SHEET_TOOLS: ToolSpec[] = [
   {
     id: "diction",
     name: "滑舌注意",
-    label: "T",
+    label: "活K",
     shortcut: "K",
     color: "#f97316",
     size: 24,
@@ -219,6 +252,9 @@ const SYSTEMS = [
 
 const COLOR_SWATCHES = [
   "#00d4ff",
+  "#39ff55",
+  "#22d3ee",
+  "#ff2d2d",
   "#facc15",
   "#fb7185",
   "#4ade80",
@@ -230,6 +266,47 @@ const COLOR_SWATCHES = [
 ];
 
 const COMMON_CHORDS = ["C", "Dm7", "Em7", "F", "G7", "Am7", "Bm7-5"];
+
+const SECTION_PRESETS = [
+  "Aメロ1",
+  "Aメロ2",
+  "Bメロ",
+  "サビ",
+  "Cメロ",
+  "Dメロ",
+  "間奏",
+  "ラスサビ"
+];
+
+const SECTION_COLORS = [
+  "#0891b2",
+  "#2563eb",
+  "#7c3aed",
+  "#db2777",
+  "#ea580c",
+  "#16a34a",
+  "#475569"
+];
+
+const DEFAULT_SECTIONS: SectionEntry[] = [
+  { id: "section-a1", name: "Aメロ1", rowIndex: 0, color: SECTION_COLORS[0] },
+  { id: "section-a2", name: "Aメロ2", rowIndex: 1, color: SECTION_COLORS[1] },
+  { id: "section-b", name: "Bメロ", rowIndex: 2, color: SECTION_COLORS[2] },
+  { id: "section-chorus", name: "サビ", rowIndex: 3, color: SECTION_COLORS[3] },
+  { id: "section-c", name: "Cメロ", rowIndex: 4, color: SECTION_COLORS[4] }
+];
+
+const ART_SYMBOL_TOOL_IDS: ToolId[] = [
+  "scoop",
+  "fall",
+  "vibrato",
+  "kobushi",
+  "breath"
+];
+
+const AUDIO_DB_NAME = "vocal-sheet-music-audio";
+const AUDIO_STORE_NAME = "audio";
+const AUDIO_RECORD_ID = "current-song";
 
 const DICTION_MARKS = [
   { value: "T", note: "タ行" },
@@ -257,6 +334,18 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
+function formatTime(seconds: number) {
+  if (!Number.isFinite(seconds)) {
+    return "0:00";
+  }
+
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = Math.floor(seconds % 60)
+    .toString()
+    .padStart(2, "0");
+  return `${minutes}:${remainingSeconds}`;
+}
+
 function isEditableTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) {
     return false;
@@ -272,9 +361,117 @@ function isToolId(value: string): value is ToolId {
   return value in TOOL_BY_ID;
 }
 
+function isArtSymbolTool(toolId: ToolId) {
+  return ART_SYMBOL_TOOL_IDS.includes(toolId);
+}
+
+function formatDictionMark(value: string) {
+  const trimmed = value.trim();
+  return `活${trimmed || "K"}`;
+}
+
+function renderToolGlyph(toolId: ToolId, label: string) {
+  if (!isArtSymbolTool(toolId)) {
+    return label;
+  }
+
+  return (
+    <span className={`symbol-art symbol-${toolId}`} aria-label={label}>
+      <span />
+    </span>
+  );
+}
+
+type StoredAudio = {
+  id: string;
+  name: string;
+  type: string;
+  blob: Blob;
+};
+
+function openAudioDatabase() {
+  return new Promise<IDBDatabase>((resolve, reject) => {
+    if (typeof indexedDB === "undefined") {
+      reject(new Error("IndexedDB is not available"));
+      return;
+    }
+
+    const request = indexedDB.open(AUDIO_DB_NAME, 1);
+
+    request.onupgradeneeded = () => {
+      const database = request.result;
+      if (!database.objectStoreNames.contains(AUDIO_STORE_NAME)) {
+        database.createObjectStore(AUDIO_STORE_NAME, { keyPath: "id" });
+      }
+    };
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function saveStoredAudio(file: File) {
+  const database = await openAudioDatabase();
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(AUDIO_STORE_NAME, "readwrite");
+      transaction
+        .objectStore(AUDIO_STORE_NAME)
+        .put({
+          id: AUDIO_RECORD_ID,
+          name: file.name,
+          type: file.type,
+          blob: file
+        } satisfies StoredAudio);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+  } finally {
+    database.close();
+  }
+}
+
+async function loadStoredAudio() {
+  const database = await openAudioDatabase();
+
+  try {
+    return await new Promise<StoredAudio | null>((resolve, reject) => {
+      const transaction = database.transaction(AUDIO_STORE_NAME, "readonly");
+      const request = transaction
+        .objectStore(AUDIO_STORE_NAME)
+        .get(AUDIO_RECORD_ID);
+
+      request.onsuccess = () => resolve((request.result as StoredAudio) ?? null);
+      request.onerror = () => reject(request.error);
+      transaction.onerror = () => reject(transaction.error);
+    });
+  } finally {
+    database.close();
+  }
+}
+
+async function deleteStoredAudio() {
+  const database = await openAudioDatabase();
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(AUDIO_STORE_NAME, "readwrite");
+      transaction.objectStore(AUDIO_STORE_NAME).delete(AUDIO_RECORD_ID);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+  } finally {
+    database.close();
+  }
+}
+
 export default function Home() {
   const sheetRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const audioInputRef = useRef<HTMLInputElement | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioUrlRef = useRef("");
   const [meta, setMeta] = useState<SheetMeta>(DEFAULT_META);
   const [items, setItems] = useState<SheetItem[]>([]);
   const [activeTool, setActiveTool] = useState<ToolId>("vibrato");
@@ -290,13 +487,25 @@ export default function Home() {
   const [readingLyrics, setReadingLyrics] = useState("");
   const [vowelLyrics, setVowelLyrics] = useState("");
   const [quickChord, setQuickChord] = useState("C");
-  const [dictionMark, setDictionMark] = useState("T");
+  const [dictionMark, setDictionMark] = useState("K");
+  const [showChords, setShowChords] = useState(true);
+  const [lyricDisplayMode, setLyricDisplayMode] =
+    useState<LyricDisplayMode>("original");
+  const [sections, setSections] = useState<SectionEntry[]>(DEFAULT_SECTIONS);
+  const [sectionRow, setSectionRow] = useState(0);
+  const [sectionName, setSectionName] = useState(SECTION_PRESETS[0]);
+  const [audioName, setAudioName] = useState("");
+  const [audioUrl, setAudioUrl] = useState("");
+  const [audioDuration, setAudioDuration] = useState(0);
+  const [audioCurrentTime, setAudioCurrentTime] = useState(0);
+  const [isAudioPlaying, setIsAudioPlaying] = useState(false);
   const [status, setStatus] = useState("準備OK");
   const [isConverting, setIsConverting] = useState(false);
   const [collapsedPanels, setCollapsedPanels] = useState<
     Record<PanelId, boolean>
   >({
     lyrics: false,
+    audio: false,
     tools: false,
     settings: false,
     inspector: false,
@@ -307,6 +516,10 @@ export default function Home() {
     () => items.find((item) => item.id === selectedId),
     [items, selectedId]
   );
+
+  const sectionByRow = useMemo(() => {
+    return new Map(sections.map((section) => [section.rowIndex, section]));
+  }, [sections]);
 
   const togglePanel = useCallback((panelId: PanelId) => {
     setCollapsedPanels((current) => ({
@@ -321,10 +534,55 @@ export default function Home() {
       items,
       sourceLyrics,
       readingLyrics,
-      vowelLyrics
+      vowelLyrics,
+      sections,
+      showChords,
+      lyricDisplayMode
     }),
-    [items, meta, readingLyrics, sourceLyrics, vowelLyrics]
+    [
+      items,
+      lyricDisplayMode,
+      meta,
+      readingLyrics,
+      sections,
+      showChords,
+      sourceLyrics,
+      vowelLyrics
+    ]
   );
+
+  const getItemDisplayLabel = useCallback(
+    (item: SheetItem) => {
+      if (item.toolId !== "lyric") {
+        return item.label;
+      }
+
+      if (lyricDisplayMode === "reading") {
+        return roughHiragana(item.label);
+      }
+
+      if (lyricDisplayMode === "vowel") {
+        return toVowels(roughHiragana(item.label));
+      }
+
+      return item.label;
+    },
+    [lyricDisplayMode]
+  );
+
+  const replaceAudioSource = useCallback((blob: Blob, name: string) => {
+    const nextUrl = URL.createObjectURL(blob);
+    if (audioUrlRef.current) {
+      URL.revokeObjectURL(audioUrlRef.current);
+    }
+
+    audioUrlRef.current = nextUrl;
+    setAudioUrl(nextUrl);
+    setAudioName(name);
+    setAudioCurrentTime(0);
+    setAudioDuration(0);
+    setIsAudioPlaying(false);
+  }, []);
 
   const getPointerPosition = useCallback((clientX: number, clientY: number) => {
     const rect = sheetRef.current?.getBoundingClientRect();
@@ -341,13 +599,14 @@ export default function Home() {
   const addItemAt = useCallback(
     (toolId: ToolId, x: number, y: number, labelOverride?: string) => {
       const tool = TOOL_BY_ID[toolId];
+      const explicitLabel = labelOverride?.trim();
       const label =
-        labelOverride ||
-        (toolId === "chord"
-          ? quickChord.trim() || "C"
-          : toolId === "diction"
-            ? dictionMark.trim() || "T"
-            : tool.label);
+        toolId === "diction"
+          ? explicitLabel?.startsWith("活")
+            ? explicitLabel
+            : formatDictionMark(explicitLabel || dictionMark)
+          : explicitLabel ||
+            (toolId === "chord" ? quickChord.trim() || "C" : tool.label);
       const item: SheetItem = {
         id: createId(),
         toolId,
@@ -371,6 +630,11 @@ export default function Home() {
     setSourceLyrics(nextDraft.sourceLyrics ?? "");
     setReadingLyrics(nextDraft.readingLyrics ?? "");
     setVowelLyrics(nextDraft.vowelLyrics ?? "");
+    setSections(
+      Array.isArray(nextDraft.sections) ? nextDraft.sections : DEFAULT_SECTIONS
+    );
+    setShowChords(nextDraft.showChords ?? true);
+    setLyricDisplayMode(nextDraft.lyricDisplayMode ?? "original");
     setSelectedId("");
   }, []);
 
@@ -522,7 +786,10 @@ export default function Home() {
       items: [],
       sourceLyrics: "",
       readingLyrics: "",
-      vowelLyrics: ""
+      vowelLyrics: "",
+      sections: DEFAULT_SECTIONS,
+      showChords: true,
+      lyricDisplayMode: "original"
     });
     setStatus("新規作成しました");
   }, [hydrateDraft]);
@@ -538,6 +805,32 @@ export default function Home() {
       }
     }
   }, [hydrateDraft]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    loadStoredAudio()
+      .then((record) => {
+        if (!isMounted || !record) {
+          return;
+        }
+
+        replaceAudioSource(record.blob, record.name);
+      })
+      .catch(() => {
+        if (isMounted) {
+          setStatus("音源ストレージを確認できませんでした");
+        }
+      });
+
+    return () => {
+      isMounted = false;
+      if (audioUrlRef.current) {
+        URL.revokeObjectURL(audioUrlRef.current);
+        audioUrlRef.current = "";
+      }
+    };
+  }, [replaceAudioSource]);
 
   useEffect(() => {
     if (!dragging) {
@@ -652,6 +945,121 @@ export default function Home() {
   const addQuickChord = () => {
     const chordIndex = items.filter((item) => item.toolId === "chord").length % 4;
     addItemAt("chord", 14 + chordIndex * 22, SYSTEMS[0].top + 1.2, quickChord);
+  };
+
+  const handleAudioUpload = async (file: File) => {
+    try {
+      await saveStoredAudio(file);
+      replaceAudioSource(file, file.name);
+      setStatus("音源を登録しました");
+    } catch {
+      setStatus("音源を登録できませんでした");
+    }
+  };
+
+  const playAudio = async () => {
+    if (!audioRef.current || !audioUrl) {
+      setStatus("音源を登録してください");
+      return;
+    }
+
+    try {
+      await audioRef.current.play();
+      setIsAudioPlaying(true);
+      setStatus("再生中");
+    } catch {
+      setStatus("再生できませんでした");
+    }
+  };
+
+  const pauseAudio = () => {
+    audioRef.current?.pause();
+    setIsAudioPlaying(false);
+    setStatus("一時停止");
+  };
+
+  const stopAudio = () => {
+    if (!audioRef.current) {
+      return;
+    }
+
+    audioRef.current.pause();
+    audioRef.current.currentTime = 0;
+    setAudioCurrentTime(0);
+    setIsAudioPlaying(false);
+    setStatus("停止しました");
+  };
+
+  const skipAudio = (seconds: number) => {
+    if (!audioRef.current) {
+      return;
+    }
+
+    audioRef.current.currentTime = clamp(
+      audioRef.current.currentTime + seconds,
+      0,
+      audioDuration || audioRef.current.duration || 0
+    );
+  };
+
+  const seekAudio = (seconds: number) => {
+    if (!audioRef.current) {
+      return;
+    }
+
+    audioRef.current.currentTime = seconds;
+    setAudioCurrentTime(seconds);
+  };
+
+  const clearAudio = async () => {
+    try {
+      await deleteStoredAudio();
+    } catch {
+      // The UI can still clear the current session even if persistent storage fails.
+    }
+
+    audioRef.current?.pause();
+    if (audioUrlRef.current) {
+      URL.revokeObjectURL(audioUrlRef.current);
+      audioUrlRef.current = "";
+    }
+    setAudioUrl("");
+    setAudioName("");
+    setAudioDuration(0);
+    setAudioCurrentTime(0);
+    setIsAudioPlaying(false);
+    setStatus("音源を解除しました");
+  };
+
+  const upsertSection = () => {
+    const trimmedName = sectionName.trim();
+    if (!trimmedName) {
+      setStatus("セクション名を入力してください");
+      return;
+    }
+
+    setSections((current) => {
+      const color = SECTION_COLORS[sectionRow % SECTION_COLORS.length];
+      const nextSection: SectionEntry = {
+        id: `section-${sectionRow}-${trimmedName}`,
+        name: trimmedName,
+        rowIndex: sectionRow,
+        color
+      };
+
+      return [
+        ...current.filter((section) => section.rowIndex !== sectionRow),
+        nextSection
+      ].sort((a, b) => a.rowIndex - b.rowIndex);
+    });
+    setStatus(`${trimmedName}を設定`);
+  };
+
+  const removeSection = (rowIndex: number) => {
+    setSections((current) =>
+      current.filter((section) => section.rowIndex !== rowIndex)
+    );
+    setStatus("セクションを外しました");
   };
 
   const updateMeta = (key: keyof SheetMeta, value: string) => {
@@ -809,6 +1217,102 @@ export default function Home() {
               </>
             )}
           </section>
+
+          <section className="panel-section audio-panel">
+            <button
+              type="button"
+              className="section-heading section-toggle"
+              onClick={() => togglePanel("audio")}
+              aria-expanded={!collapsedPanels.audio}
+            >
+              <Music2 size={18} />
+              <span>音源</span>
+              <ChevronDown
+                className={`section-chevron ${
+                  collapsedPanels.audio ? "collapsed" : ""
+                }`}
+                size={18}
+              />
+            </button>
+            {!collapsedPanels.audio && (
+              <>
+                <input
+                  ref={audioInputRef}
+                  className="sr-only"
+                  type="file"
+                  accept="audio/*"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) {
+                      void handleAudioUpload(file);
+                    }
+                    event.currentTarget.value = "";
+                  }}
+                />
+                <button
+                  type="button"
+                  className="wide-button neutral"
+                  onClick={() => audioInputRef.current?.click()}
+                >
+                  <Upload size={16} />
+                  <span>音源を登録</span>
+                </button>
+                <p className="audio-file-name">{audioName || "未登録"}</p>
+                <audio
+                  ref={audioRef}
+                  src={audioUrl || undefined}
+                  onLoadedMetadata={(event) =>
+                    setAudioDuration(event.currentTarget.duration || 0)
+                  }
+                  onTimeUpdate={(event) =>
+                    setAudioCurrentTime(event.currentTarget.currentTime)
+                  }
+                  onEnded={() => setIsAudioPlaying(false)}
+                />
+                <div className="audio-controls" aria-label="音源操作">
+                  <button type="button" onClick={() => skipAudio(-5)} title="戻る">
+                    <SkipBack size={16} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={isAudioPlaying ? pauseAudio : playAudio}
+                    title={isAudioPlaying ? "一時停止" : "再生"}
+                  >
+                    {isAudioPlaying ? <Pause size={18} /> : <Play size={18} />}
+                  </button>
+                  <button type="button" onClick={stopAudio} title="停止">
+                    <Square size={15} />
+                  </button>
+                  <button type="button" onClick={() => skipAudio(5)} title="進む">
+                    <SkipForward size={16} />
+                  </button>
+                </div>
+                <input
+                  className="audio-slider"
+                  type="range"
+                  min={0}
+                  max={audioDuration || 0}
+                  step={0.1}
+                  value={Math.min(audioCurrentTime, audioDuration || 0)}
+                  onChange={(event) => seekAudio(Number(event.target.value))}
+                  aria-label="再生位置"
+                />
+                <div className="audio-time">
+                  <span>{formatTime(audioCurrentTime)}</span>
+                  <span>{formatTime(audioDuration)}</span>
+                </div>
+                <button
+                  type="button"
+                  className="wide-button neutral"
+                  onClick={() => void clearAudio()}
+                  disabled={!audioUrl}
+                >
+                  <Eraser size={16} />
+                  <span>音源を解除</span>
+                </button>
+              </>
+            )}
+          </section>
         </aside>
 
         <section className="score-column">
@@ -836,10 +1340,37 @@ export default function Home() {
             />
           </div>
 
+          <div className="sheet-view-controls" aria-label="譜面表示">
+            <div className="segmented-control">
+              {[
+                ["original", "原文"],
+                ["reading", "ひらがな"],
+                ["vowel", "母音"]
+              ].map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={lyricDisplayMode === mode ? "active" : ""}
+                  onClick={() => setLyricDisplayMode(mode as LyricDisplayMode)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <label className="toggle-control">
+              <input
+                type="checkbox"
+                checked={showChords}
+                onChange={(event) => setShowChords(event.target.checked)}
+              />
+              <span>コード表示</span>
+            </label>
+          </div>
+
           <div className="score-stage">
             <div
               ref={sheetRef}
-              className="score-page"
+              className={`score-page ${showChords ? "" : "hide-chords"}`}
               onPointerDown={handleSheetPointerDown}
               onDragOver={(event) => event.preventDefault()}
               onDrop={handleDrop}
@@ -861,18 +1392,30 @@ export default function Home() {
                   }}
                 >
                   <div className="phrase-row-header">
-                    <span>{systemIndex + 1}</span>
+                    <span
+                      style={
+                        {
+                          "--section-color":
+                            sectionByRow.get(systemIndex)?.color ?? "#0891b2"
+                        } as CSSProperties
+                      }
+                    >
+                      {sectionByRow.get(systemIndex)?.name ?? systemIndex + 1}
+                    </span>
                     <span>コード</span>
-                    <span>歌詞</span>
-                    <span>記号</span>
                   </div>
-                  <div className="lyric-writing-lane" aria-hidden="true" />
                   <div className="note-writing-lane" aria-hidden="true" />
+                  <div className="lyric-writing-lane" aria-hidden="true" />
                 </div>
               ))}
 
               {items.map((item) => {
+                if (!showChords && item.toolId === "chord") {
+                  return null;
+                }
+
                 const tool = TOOL_BY_ID[item.toolId];
+                const displayLabel = getItemDisplayLabel(item);
                 const itemStyle = {
                   left: `${item.x}%`,
                   top: `${item.y}%`,
@@ -897,7 +1440,7 @@ export default function Home() {
                     }}
                     title={tool.name}
                   >
-                    {item.label}
+                    {renderToolGlyph(item.toolId, displayLabel)}
                   </button>
                 );
               })}
@@ -940,7 +1483,9 @@ export default function Home() {
                     }}
                     title={`${tool.name} ${tool.shortcut}`}
                   >
-                    <span className="tool-symbol">{tool.label}</span>
+                    <span className="tool-symbol">
+                      {renderToolGlyph(tool.id, tool.label)}
+                    </span>
                     <span className="tool-name">{tool.name}</span>
                     <kbd>{tool.shortcut}</kbd>
                   </button>
@@ -1035,7 +1580,7 @@ export default function Home() {
                         addItemAt(
                           "diction",
                           16 + markIndex * 18,
-                          SYSTEMS[1].top + SYSTEMS[1].height - 2,
+                          SYSTEMS[1].top + 5.4,
                           dictionMark
                         );
                       }
@@ -1050,7 +1595,7 @@ export default function Home() {
                       addItemAt(
                         "diction",
                         16 + markIndex * 18,
-                        SYSTEMS[1].top + SYSTEMS[1].height - 2,
+                        SYSTEMS[1].top + 5.4,
                         dictionMark
                       );
                     }}
@@ -1068,12 +1613,68 @@ export default function Home() {
                       onClick={() => {
                         setDictionMark(mark.value);
                         setActiveTool("diction");
-                        setStatus(`${mark.value}を入力`);
+                        setStatus(`${formatDictionMark(mark.value)}を入力`);
                       }}
                       title={mark.note}
                     >
                       <span>{mark.value}</span>
                       <small>{mark.note}</small>
+                    </button>
+                  ))}
+                </div>
+
+                <label className="field-label" htmlFor="sectionName">
+                  セクション
+                </label>
+                <div className="section-editor">
+                  <select
+                    aria-label="段"
+                    value={sectionRow}
+                    onChange={(event) => setSectionRow(Number(event.target.value))}
+                  >
+                    {SYSTEMS.map((_, rowIndex) => (
+                      <option key={rowIndex} value={rowIndex}>
+                        {rowIndex + 1}段目
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    id="sectionName"
+                    value={sectionName}
+                    onChange={(event) => setSectionName(event.target.value)}
+                  >
+                    {SECTION_PRESETS.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="square-button"
+                    onClick={upsertSection}
+                    title="セクションを設定"
+                  >
+                    <Plus size={18} />
+                  </button>
+                </div>
+                <input
+                  aria-label="自由入力のセクション名"
+                  value={sectionName}
+                  onChange={(event) => setSectionName(event.target.value)}
+                  placeholder="自由入力"
+                />
+                <div className="section-chips" aria-label="設定済みセクション">
+                  {sections.map((section) => (
+                    <button
+                      key={`${section.rowIndex}-${section.id}`}
+                      type="button"
+                      style={{ "--section-color": section.color } as CSSProperties}
+                      onClick={() => removeSection(section.rowIndex)}
+                      title="クリックで外す"
+                    >
+                      <span>{section.rowIndex + 1}</span>
+                      {section.name}
                     </button>
                   ))}
                 </div>
