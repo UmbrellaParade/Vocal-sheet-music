@@ -693,6 +693,36 @@ kbd {
   accent-color: var(--accent);
 }
 
+.scroll-mode-control {
+  grid-template-columns: repeat(2, minmax(74px, 1fr));
+  width: 100%;
+  margin-bottom: 10px;
+}
+
+.scroll-audio-toggle {
+  justify-content: flex-start;
+  margin-bottom: 8px;
+}
+
+.scroll-setting-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.scroll-setting-grid label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.scroll-slider {
+  margin-top: 12px;
+  accent-color: var(--accent);
+}
+
 .score-stage {
   min-height: calc(100vh - 154px);
   overflow: auto;
@@ -742,6 +772,34 @@ kbd {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 22px;
+}
+
+.auto-scroll-guide {
+  position: absolute;
+  left: 5%;
+  right: 5%;
+  z-index: 3;
+  height: 0;
+  border-top: 2px solid rgba(8, 145, 178, 0.72);
+  pointer-events: none;
+  transform: translateY(-50%);
+  transition: top 180ms linear;
+}
+
+.auto-scroll-guide::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: -6px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #0891b2;
+  box-shadow: 0 0 0 4px rgba(8, 145, 178, 0.14);
+}
+
+.auto-scroll-guide.running {
+  border-top-color: rgba(14, 116, 144, 0.9);
 }
 
 .system {
@@ -1358,7 +1416,8 @@ kbd {
   .topbar,
   .side-panel,
   .sheet-toolbar,
-  .sheet-view-controls {
+  .sheet-view-controls,
+  .auto-scroll-guide {
     display: none;
   }
 

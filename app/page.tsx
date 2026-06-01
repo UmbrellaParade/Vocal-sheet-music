@@ -24,6 +24,7 @@ import {
   SkipBack,
   SkipForward,
   Square,
+  Timer,
   Trash2,
   Type,
   Upload,
@@ -102,6 +103,7 @@ type DraftData = {
   showChords?: boolean;
   lyricDisplayMode?: LyricDisplayMode;
   pinnedDictionMarks?: string[];
+  autoScrollSettings?: AutoScrollSettings;
 };
 
 type SectionEntry = {
@@ -118,9 +120,21 @@ type SectionEntry = {
 
 type LyricDisplayMode = "original" | "reading" | "vowel";
 
+type AutoScrollMode = "seconds" | "bpm";
+
+type AutoScrollSettings = {
+  mode: AutoScrollMode;
+  durationSeconds: string;
+  beatsPerMeasure: string;
+  measuresPerRow: string;
+  leadInSeconds: string;
+  followAudio: boolean;
+};
+
 type PanelId =
   | "lyrics"
   | "audio"
+  | "scroll"
   | "share"
   | "tools"
   | "settings"
@@ -135,6 +149,15 @@ const DEFAULT_META: SheetMeta = {
   key: "C",
   tempo: "120",
   memo: ""
+};
+
+const DEFAULT_AUTO_SCROLL_SETTINGS: AutoScrollSettings = {
+  mode: "bpm",
+  durationSeconds: "180",
+  beatsPerMeasure: "4",
+  measuresPerRow: "4",
+  leadInSeconds: "2",
+  followAudio: true
 };
 
 const SHEET_TOOLS: ToolSpec[] = [
@@ -285,6 +308,9 @@ const SYSTEMS = [
   { top: 81.2, height: 9.8 }
 ];
 
+const SCORE_SCROLL_START = SYSTEMS[0].top;
+const SCORE_SCROLL_END = SYSTEMS[SYSTEMS.length - 1].top + SYSTEMS[SYSTEMS.length - 1].height;
+
 const COLOR_SWATCHES = [
   "#0ea5e9",
   "#22a85a",
@@ -432,6 +458,50 @@ function formatTime(seconds: number) {
     .toString()
     .padStart(2, "0");
   return `${minutes}:${remainingSeconds}`;
+}
+
+function parsePositiveNumber(value: string, fallback: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function getAutoScrollLeadIn(settings: AutoScrollSettings) {
+  return Math.max(Number(settings.leadInSeconds) || 0, 0);
+}
+
+function getAutoScrollDurationSeconds(
+  settings: AutoScrollSettings,
+  tempo: string
+) {
+  const leadInSeconds = getAutoScrollLeadIn(settings);
+
+  if (settings.mode === "seconds") {
+    return Math.max(parsePositiveNumber(settings.durationSeconds, 180), leadInSeconds + 1);
+  }
+
+  const bpm = parsePositiveNumber(tempo, 120);
+  const beatsPerMeasure = parsePositiveNumber(settings.beatsPerMeasure, 4);
+  const measuresPerRow = parsePositiveNumber(settings.measuresPerRow, 4);
+  const rowSeconds = (measuresPerRow * beatsPerMeasure * 60) / bpm;
+
+  return leadInSeconds + rowSeconds * SYSTEMS.length;
+}
+
+function getAutoScrollProgress(
+  elapsedSeconds: number,
+  durationSeconds: number,
+  leadInSeconds: number
+) {
+  if (elapsedSeconds <= leadInSeconds) {
+    return 0;
+  }
+
+  return clamp(
+    (elapsedSeconds - leadInSeconds) /
+      Math.max(durationSeconds - leadInSeconds, 1),
+    0,
+    1
+  );
 }
 
 function getSectionStartRow(section: SectionEntry) {
@@ -603,10 +673,13 @@ async function deleteStoredAudio() {
 
 export default function Home() {
   const sheetRef = useRef<HTMLDivElement | null>(null);
+  const scoreStageRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const audioInputRef = useRef<HTMLInputElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef("");
+  const autoScrollFrameRef = useRef<number | null>(null);
+  const autoScrollStartTimeRef = useRef(0);
   const [meta, setMeta] = useState<SheetMeta>(DEFAULT_META);
   const [items, setItems] = useState<SheetItem[]>([]);
   const [activeTool, setActiveTool] = useState<ToolId>("vibrato");
@@ -637,6 +710,10 @@ export default function Home() {
     DEFAULT_PINNED_DICTION_MARKS
   );
   const [sharePayload, setSharePayload] = useState("");
+  const [autoScrollSettings, setAutoScrollSettings] =
+    useState<AutoScrollSettings>(DEFAULT_AUTO_SCROLL_SETTINGS);
+  const [isAutoScrolling, setIsAutoScrolling] = useState(false);
+  const [autoScrollElapsed, setAutoScrollElapsed] = useState(0);
   const [audioName, setAudioName] = useState("");
   const [audioUrl, setAudioUrl] = useState("");
   const [audioDuration, setAudioDuration] = useState(0);
@@ -649,6 +726,7 @@ export default function Home() {
   >({
     lyrics: false,
     audio: false,
+    scroll: false,
     share: false,
     tools: false,
     settings: false,
@@ -697,6 +775,33 @@ export default function Home() {
     [pinnedDictionMarks]
   );
 
+  const autoScrollDurationSeconds = useMemo(
+    () => getAutoScrollDurationSeconds(autoScrollSettings, meta.tempo),
+    [autoScrollSettings, meta.tempo]
+  );
+
+  const autoScrollLeadInSeconds = useMemo(
+    () => getAutoScrollLeadIn(autoScrollSettings),
+    [autoScrollSettings]
+  );
+
+  const autoScrollProgress = useMemo(
+    () =>
+      getAutoScrollProgress(
+        autoScrollElapsed,
+        autoScrollDurationSeconds,
+        autoScrollLeadInSeconds
+      ),
+    [autoScrollDurationSeconds, autoScrollElapsed, autoScrollLeadInSeconds]
+  );
+
+  const autoScrollGuideTop = useMemo(
+    () =>
+      SCORE_SCROLL_START +
+      (SCORE_SCROLL_END - SCORE_SCROLL_START) * autoScrollProgress,
+    [autoScrollProgress]
+  );
+
   const togglePanel = useCallback((panelId: PanelId) => {
     setCollapsedPanels((current) => ({
       ...current,
@@ -714,9 +819,11 @@ export default function Home() {
       sections,
       showChords,
       lyricDisplayMode,
-      pinnedDictionMarks
+      pinnedDictionMarks,
+      autoScrollSettings
     }),
     [
+      autoScrollSettings,
       items,
       lyricDisplayMode,
       meta,
@@ -774,6 +881,48 @@ export default function Home() {
     };
   }, []);
 
+  const updateAutoScrollSetting = useCallback(
+    <Key extends keyof AutoScrollSettings>(
+      key: Key,
+      value: AutoScrollSettings[Key]
+    ) => {
+      setAutoScrollSettings((current) => ({ ...current, [key]: value }));
+    },
+    []
+  );
+
+  const scrollScoreToProgress = useCallback((progress: number) => {
+    const scoreStage = scoreStageRef.current;
+    if (!scoreStage) {
+      return;
+    }
+
+    const scrollDistance = scoreStage.scrollHeight - scoreStage.clientHeight;
+    if (scrollDistance <= 0) {
+      return;
+    }
+
+    scoreStage.scrollTo({
+      top: scrollDistance * clamp(progress, 0, 1),
+      behavior: "auto"
+    });
+  }, []);
+
+  const seekAutoScroll = useCallback(
+    (seconds: number) => {
+      const nextElapsed = clamp(seconds, 0, autoScrollDurationSeconds);
+      setAutoScrollElapsed(nextElapsed);
+      scrollScoreToProgress(
+        getAutoScrollProgress(
+          nextElapsed,
+          autoScrollDurationSeconds,
+          autoScrollLeadInSeconds
+        )
+      );
+    },
+    [autoScrollDurationSeconds, autoScrollLeadInSeconds, scrollScoreToProgress]
+  );
+
   const addItemAt = useCallback(
     (toolId: ToolId, x: number, y: number, labelOverride?: string) => {
       const tool = TOOL_BY_ID[toolId];
@@ -816,6 +965,12 @@ export default function Home() {
         ? nextDraft.pinnedDictionMarks
         : DEFAULT_PINNED_DICTION_MARKS
     );
+    setAutoScrollSettings({
+      ...DEFAULT_AUTO_SCROLL_SETTINGS,
+      ...(nextDraft.autoScrollSettings ?? {})
+    });
+    setIsAutoScrolling(false);
+    setAutoScrollElapsed(0);
     setSelectedId("");
   }, []);
 
@@ -971,7 +1126,8 @@ export default function Home() {
       sections: DEFAULT_SECTIONS,
       showChords: true,
       lyricDisplayMode: "original",
-      pinnedDictionMarks: DEFAULT_PINNED_DICTION_MARKS
+      pinnedDictionMarks: DEFAULT_PINNED_DICTION_MARKS,
+      autoScrollSettings: DEFAULT_AUTO_SCROLL_SETTINGS
     });
     setStatus("新規作成しました");
   }, [hydrateDraft]);
@@ -1054,6 +1210,65 @@ export default function Home() {
       window.removeEventListener("pointerup", handlePointerUp);
     };
   }, [dragging, getPointerPosition, updateItem]);
+
+  useEffect(() => {
+    if (!isAutoScrolling) {
+      return;
+    }
+
+    const usesAudio = autoScrollSettings.followAudio && Boolean(audioUrl);
+    const startingElapsed = autoScrollElapsed;
+
+    if (!usesAudio) {
+      autoScrollStartTimeRef.current =
+        performance.now() - startingElapsed * 1000;
+    }
+
+    const tick = (timestamp: number) => {
+      const audioElement = audioRef.current;
+      const nextElapsed =
+        usesAudio && audioElement
+          ? audioElement.currentTime
+          : (timestamp - autoScrollStartTimeRef.current) / 1000;
+
+      if (usesAudio && (!audioElement || audioElement.paused || audioElement.ended)) {
+        setIsAutoScrolling(false);
+        return;
+      }
+
+      const nextProgress = getAutoScrollProgress(
+        nextElapsed,
+        autoScrollDurationSeconds,
+        autoScrollLeadInSeconds
+      );
+
+      setAutoScrollElapsed(nextElapsed);
+      scrollScoreToProgress(nextProgress);
+
+      if (nextProgress >= 1) {
+        setIsAutoScrolling(false);
+        return;
+      }
+
+      autoScrollFrameRef.current = requestAnimationFrame(tick);
+    };
+
+    autoScrollFrameRef.current = requestAnimationFrame(tick);
+
+    return () => {
+      if (autoScrollFrameRef.current !== null) {
+        cancelAnimationFrame(autoScrollFrameRef.current);
+        autoScrollFrameRef.current = null;
+      }
+    };
+  }, [
+    audioUrl,
+    autoScrollDurationSeconds,
+    autoScrollLeadInSeconds,
+    autoScrollSettings.followAudio,
+    isAutoScrolling,
+    scrollScoreToProgress
+  ]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -1205,6 +1420,43 @@ export default function Home() {
 
     audioRef.current.currentTime = seconds;
     setAudioCurrentTime(seconds);
+  };
+
+  const startAutoScroll = async () => {
+    if (autoScrollElapsed >= autoScrollDurationSeconds) {
+      seekAutoScroll(0);
+    }
+
+    if (autoScrollSettings.followAudio && audioUrl) {
+      await playAudio();
+    }
+
+    setIsAutoScrolling(true);
+    setStatus("自動スクロール中");
+  };
+
+  const pauseAutoScroll = () => {
+    setIsAutoScrolling(false);
+
+    if (autoScrollSettings.followAudio && audioUrl) {
+      pauseAudio();
+      return;
+    }
+
+    setStatus("自動スクロールを一時停止");
+  };
+
+  const stopAutoScroll = () => {
+    setIsAutoScrolling(false);
+    setAutoScrollElapsed(0);
+    scrollScoreToProgress(0);
+
+    if (autoScrollSettings.followAudio && audioUrl) {
+      stopAudio();
+      return;
+    }
+
+    setStatus("自動スクロールを停止");
   };
 
   const clearAudio = async () => {
@@ -1600,6 +1852,166 @@ export default function Home() {
             )}
           </section>
 
+          <section className="panel-section auto-scroll-panel">
+            <button
+              type="button"
+              className="section-heading section-toggle"
+              onClick={() => togglePanel("scroll")}
+              aria-expanded={!collapsedPanels.scroll}
+            >
+              <Timer size={18} />
+              <span>自動スクロール</span>
+              <ChevronDown
+                className={`section-chevron ${
+                  collapsedPanels.scroll ? "collapsed" : ""
+                }`}
+                size={18}
+              />
+            </button>
+            {!collapsedPanels.scroll && (
+              <>
+                <div className="segmented-control scroll-mode-control">
+                  {[
+                    ["bpm", "BPM"],
+                    ["seconds", "秒数"]
+                  ].map(([mode, label]) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      className={
+                        autoScrollSettings.mode === mode ? "active" : ""
+                      }
+                      onClick={() =>
+                        updateAutoScrollSetting("mode", mode as AutoScrollMode)
+                      }
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <label className="toggle-control scroll-audio-toggle">
+                  <input
+                    type="checkbox"
+                    checked={autoScrollSettings.followAudio}
+                    onChange={(event) =>
+                      updateAutoScrollSetting("followAudio", event.target.checked)
+                    }
+                  />
+                  <span>音源追従</span>
+                </label>
+
+                {autoScrollSettings.mode === "seconds" ? (
+                  <>
+                    <label className="field-label" htmlFor="scrollSeconds">
+                      全体秒数
+                    </label>
+                    <input
+                      id="scrollSeconds"
+                      type="number"
+                      min={1}
+                      value={autoScrollSettings.durationSeconds}
+                      onChange={(event) =>
+                        updateAutoScrollSetting(
+                          "durationSeconds",
+                          event.target.value
+                        )
+                      }
+                    />
+                  </>
+                ) : (
+                  <div className="scroll-setting-grid">
+                    <label>
+                      <span>拍子</span>
+                      <input
+                        type="number"
+                        min={1}
+                        value={autoScrollSettings.beatsPerMeasure}
+                        onChange={(event) =>
+                          updateAutoScrollSetting(
+                            "beatsPerMeasure",
+                            event.target.value
+                          )
+                        }
+                      />
+                    </label>
+                    <label>
+                      <span>1段小節</span>
+                      <input
+                        type="number"
+                        min={1}
+                        value={autoScrollSettings.measuresPerRow}
+                        onChange={(event) =>
+                          updateAutoScrollSetting(
+                            "measuresPerRow",
+                            event.target.value
+                          )
+                        }
+                      />
+                    </label>
+                  </div>
+                )}
+
+                <label className="field-label" htmlFor="leadInSeconds">
+                  前カウント
+                </label>
+                <input
+                  id="leadInSeconds"
+                  type="number"
+                  min={0}
+                  value={autoScrollSettings.leadInSeconds}
+                  onChange={(event) =>
+                    updateAutoScrollSetting("leadInSeconds", event.target.value)
+                  }
+                />
+
+                <input
+                  className="scroll-slider"
+                  type="range"
+                  min={0}
+                  max={autoScrollDurationSeconds}
+                  step={0.1}
+                  value={Math.min(autoScrollElapsed, autoScrollDurationSeconds)}
+                  onChange={(event) => seekAutoScroll(Number(event.target.value))}
+                  aria-label="自動スクロール位置"
+                />
+                <div className="audio-time">
+                  <span>{formatTime(autoScrollElapsed)}</span>
+                  <span>{formatTime(autoScrollDurationSeconds)}</span>
+                </div>
+                <div className="audio-controls" aria-label="自動スクロール操作">
+                  <button
+                    type="button"
+                    onClick={() => seekAutoScroll(autoScrollElapsed - 5)}
+                    title="戻る"
+                  >
+                    <SkipBack size={16} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={
+                      isAutoScrolling
+                        ? pauseAutoScroll
+                        : () => void startAutoScroll()
+                    }
+                    title={isAutoScrolling ? "一時停止" : "開始"}
+                  >
+                    {isAutoScrolling ? <Pause size={18} /> : <Play size={18} />}
+                  </button>
+                  <button type="button" onClick={stopAutoScroll} title="停止">
+                    <Square size={15} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => seekAutoScroll(autoScrollElapsed + 5)}
+                    title="進む"
+                  >
+                    <SkipForward size={16} />
+                  </button>
+                </div>
+              </>
+            )}
+          </section>
+
           <section className="panel-section share-panel">
             <button
               type="button"
@@ -1710,7 +2122,7 @@ export default function Home() {
             </label>
           </div>
 
-          <div className="score-stage">
+          <div ref={scoreStageRef} className="score-stage">
             <div
               ref={sheetRef}
               className={`score-page ${showChords ? "" : "hide-chords"}`}
@@ -1724,6 +2136,16 @@ export default function Home() {
                 <span>Key {meta.key || "-"}</span>
                 <span>{meta.tempo || "-"} BPM</span>
               </div>
+
+              {(isAutoScrolling || autoScrollElapsed > 0) && (
+                <div
+                  className={`auto-scroll-guide ${
+                    isAutoScrolling ? "running" : ""
+                  }`}
+                  style={{ top: `${autoScrollGuideTop}%` }}
+                  aria-hidden="true"
+                />
+              )}
 
               {SYSTEMS.map((system, systemIndex) => (
                 (() => {
