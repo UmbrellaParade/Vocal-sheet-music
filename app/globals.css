@@ -551,23 +551,19 @@ kbd {
 }
 
 .sheet-symbol {
-  min-width: 34px;
-  min-height: 32px;
-  padding: 0 4px;
-  border-color: color-mix(in srgb, var(--item-color), white 28%);
-  border-radius: 999px;
+  min-width: auto;
+  min-height: auto;
+  padding: 0 2px;
+  border-color: transparent;
+  border-radius: 0;
   color: var(--item-color);
   font-weight: 900;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.15), transparent 42%),
-    color-mix(in srgb, var(--item-color), #111827 78%);
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--item-color), transparent 68%),
-    0 0 16px color-mix(in srgb, var(--item-color), transparent 45%),
-    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  background: transparent;
+  box-shadow: none;
   text-shadow:
-    0 0 10px color-mix(in srgb, var(--item-color), transparent 15%),
-    0 1px 0 #020617;
+    0 0 4px rgba(255, 255, 255, 0.75),
+    0 0 10px color-mix(in srgb, var(--item-color), transparent 18%),
+    0 1px 1px rgba(2, 6, 23, 0.6);
 }
 
 .sheet-text {
@@ -596,45 +592,31 @@ kbd {
 
 .sheet-symbol.tool-vibrato {
   min-width: 56px;
-  background:
-    repeating-linear-gradient(
-      90deg,
-      color-mix(in srgb, var(--item-color), #111827 72%) 0 8px,
-      color-mix(in srgb, var(--item-color), #111827 84%) 8px 16px
-    );
+  letter-spacing: 0.08em;
 }
 
 .sheet-symbol.tool-breath {
-  min-width: 32px;
-  background:
-    radial-gradient(circle at 34% 32%, rgba(255, 255, 255, 0.35), transparent 18%),
-    radial-gradient(circle at 70% 68%, color-mix(in srgb, var(--item-color), transparent 52%), transparent 22%),
-    color-mix(in srgb, var(--item-color), #0f172a 80%);
+  min-width: auto;
 }
 
 .sheet-symbol.tool-scoop,
 .sheet-symbol.tool-fall {
-  border-radius: 8px;
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--item-color), transparent 48%), transparent 46%),
-    color-mix(in srgb, var(--item-color), #0f172a 82%);
+  border-radius: 0;
 }
 
 .sheet-symbol.tool-accent {
-  border-radius: 8px;
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--item-color), transparent 48%), transparent),
-    color-mix(in srgb, var(--item-color), #0f172a 78%);
+  border-radius: 0;
+}
+
+.sheet-symbol.tool-diction {
+  min-width: 46px;
+  letter-spacing: 0;
+  -webkit-text-stroke: 0.35px #7c2d12;
 }
 
 .sheet-symbol.tool-hold {
   min-width: 70px;
-  background:
-    repeating-linear-gradient(
-      90deg,
-      color-mix(in srgb, var(--item-color), #111827 62%) 0 14px,
-      color-mix(in srgb, var(--item-color), #111827 78%) 14px 22px
-    );
+  letter-spacing: 0.06em;
 }
 
 .sheet-text.tool-lyric {
@@ -659,6 +641,16 @@ kbd {
     0 0 0 2px rgba(250, 204, 21, 0.38),
     0 0 22px rgba(250, 204, 21, 0.32),
     0 8px 20px rgba(15, 23, 42, 0.16);
+}
+
+.sheet-symbol.selected {
+  border-color: transparent;
+  box-shadow: none;
+  text-shadow:
+    0 0 4px rgba(255, 255, 255, 0.9),
+    0 0 12px color-mix(in srgb, var(--item-color), transparent 8%),
+    0 0 22px rgba(250, 204, 21, 0.36),
+    0 1px 1px rgba(2, 6, 23, 0.7);
 }
 
 .inspector {

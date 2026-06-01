@@ -40,6 +40,7 @@ type ToolId =
   | "scoop"
   | "fall"
   | "accent"
+  | "diction"
   | "hold"
   | "dynamic"
   | "marker";
@@ -166,6 +167,15 @@ const SHEET_TOOLS: ToolSpec[] = [
     kind: "symbol"
   },
   {
+    id: "diction",
+    name: "滑舌注意",
+    label: "舌!",
+    shortcut: "K",
+    color: "#f97316",
+    size: 24,
+    kind: "symbol"
+  },
+  {
     id: "hold",
     name: "ロング",
     label: "━",
@@ -210,6 +220,7 @@ const COLOR_SWATCHES = [
   "#60a5fa",
   "#a78bfa",
   "#fb923c",
+  "#f97316",
   "#f8fafc"
 ];
 
