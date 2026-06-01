@@ -98,7 +98,7 @@ const SHEET_TOOLS: ToolSpec[] = [
     name: "歌詞",
     label: "la",
     shortcut: "L",
-    color: "#1f2937",
+    color: "#f8fafc",
     size: 18,
     kind: "text"
   },
@@ -107,7 +107,7 @@ const SHEET_TOOLS: ToolSpec[] = [
     name: "母音",
     label: "a",
     shortcut: "O",
-    color: "#0f766e",
+    color: "#22d3ee",
     size: 16,
     kind: "text"
   },
@@ -116,7 +116,7 @@ const SHEET_TOOLS: ToolSpec[] = [
     name: "コード",
     label: "C",
     shortcut: "C",
-    color: "#7c2d12",
+    color: "#f59e0b",
     size: 20,
     kind: "chord"
   },
@@ -125,7 +125,7 @@ const SHEET_TOOLS: ToolSpec[] = [
     name: "ビブラート",
     label: "〜",
     shortcut: "V",
-    color: "#b42318",
+    color: "#00d4ff",
     size: 30,
     kind: "symbol"
   },
@@ -134,7 +134,7 @@ const SHEET_TOOLS: ToolSpec[] = [
     name: "ブレス",
     label: ",",
     shortcut: "B",
-    color: "#2563eb",
+    color: "#60a5fa",
     size: 34,
     kind: "symbol"
   },
@@ -143,7 +143,7 @@ const SHEET_TOOLS: ToolSpec[] = [
     name: "しゃくり",
     label: "↗",
     shortcut: "S",
-    color: "#047857",
+    color: "#4ade80",
     size: 28,
     kind: "symbol"
   },
@@ -152,7 +152,7 @@ const SHEET_TOOLS: ToolSpec[] = [
     name: "フォール",
     label: "↘",
     shortcut: "F",
-    color: "#9333ea",
+    color: "#a78bfa",
     size: 28,
     kind: "symbol"
   },
@@ -161,7 +161,7 @@ const SHEET_TOOLS: ToolSpec[] = [
     name: "アクセント",
     label: ">",
     shortcut: "A",
-    color: "#c2410c",
+    color: "#fb7185",
     size: 28,
     kind: "symbol"
   },
@@ -170,7 +170,7 @@ const SHEET_TOOLS: ToolSpec[] = [
     name: "ロング",
     label: "━",
     shortcut: "H",
-    color: "#52525b",
+    color: "#facc15",
     size: 28,
     kind: "symbol"
   },
@@ -179,7 +179,7 @@ const SHEET_TOOLS: ToolSpec[] = [
     name: "強弱",
     label: "mf",
     shortcut: "D",
-    color: "#0f172a",
+    color: "#38bdf8",
     size: 18,
     kind: "text"
   },
@@ -188,7 +188,7 @@ const SHEET_TOOLS: ToolSpec[] = [
     name: "区切り",
     label: "A",
     shortcut: "M",
-    color: "#92400e",
+    color: "#fb923c",
     size: 18,
     kind: "text"
   }
@@ -203,14 +203,14 @@ const SYSTEMS = [
 ];
 
 const COLOR_SWATCHES = [
-  "#1f2937",
-  "#0f766e",
-  "#b42318",
-  "#7c2d12",
-  "#2563eb",
-  "#9333ea",
-  "#c2410c",
-  "#52525b"
+  "#00d4ff",
+  "#facc15",
+  "#fb7185",
+  "#4ade80",
+  "#60a5fa",
+  "#a78bfa",
+  "#fb923c",
+  "#f8fafc"
 ];
 
 const TOOL_BY_ID = SHEET_TOOLS.reduce(
@@ -671,35 +671,6 @@ export default function Home() {
         <aside className="side-panel left-panel">
           <section className="panel-section">
             <div className="section-heading">
-              <Keyboard size={18} />
-              <span>記号</span>
-            </div>
-            <div className="tool-grid">
-              {SHEET_TOOLS.map((tool) => (
-                <button
-                  key={tool.id}
-                  type="button"
-                  draggable
-                  className={`tool-button ${activeTool === tool.id ? "active" : ""}`}
-                  onClick={() => setActiveTool(tool.id)}
-                  onDragStart={(event) => {
-                    event.dataTransfer.effectAllowed = "copy";
-                    event.dataTransfer.setData("application/x-vocal-tool", tool.id);
-                  }}
-                  title={`${tool.name} ${tool.shortcut}`}
-                >
-                  <span className="tool-symbol" style={{ color: tool.color }}>
-                    {tool.label}
-                  </span>
-                  <span className="tool-name">{tool.name}</span>
-                  <kbd>{tool.shortcut}</kbd>
-                </button>
-              ))}
-            </div>
-          </section>
-
-          <section className="panel-section">
-            <div className="section-heading">
               <Wand2 size={18} />
               <span>歌詞</span>
             </div>
@@ -842,7 +813,7 @@ export default function Home() {
                   <button
                     key={item.id}
                     type="button"
-                    className={`sheet-item sheet-${tool.kind} ${
+                    className={`sheet-item sheet-${tool.kind} tool-${item.toolId} ${
                       selectedId === item.id ? "selected" : ""
                     }`}
                     style={itemStyle}
@@ -864,6 +835,36 @@ export default function Home() {
         </section>
 
         <aside className="side-panel right-panel">
+          <section className="panel-section tool-palette">
+            <div className="section-heading">
+              <Keyboard size={18} />
+              <span>記号</span>
+            </div>
+            <div className="tool-grid">
+              {SHEET_TOOLS.map((tool) => (
+                <button
+                  key={tool.id}
+                  type="button"
+                  draggable
+                  className={`tool-button tool-${tool.id} ${
+                    activeTool === tool.id ? "active" : ""
+                  }`}
+                  style={{ "--tool-color": tool.color } as CSSProperties}
+                  onClick={() => setActiveTool(tool.id)}
+                  onDragStart={(event) => {
+                    event.dataTransfer.effectAllowed = "copy";
+                    event.dataTransfer.setData("application/x-vocal-tool", tool.id);
+                  }}
+                  title={`${tool.name} ${tool.shortcut}`}
+                >
+                  <span className="tool-symbol">{tool.label}</span>
+                  <span className="tool-name">{tool.name}</span>
+                  <kbd>{tool.shortcut}</kbd>
+                </button>
+              ))}
+            </div>
+          </section>
+
           <section className="panel-section">
             <div className="section-heading">
               <SlidersHorizontal size={18} />
