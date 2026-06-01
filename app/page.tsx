@@ -102,6 +102,7 @@ type DraftData = {
   sections?: SectionEntry[];
   showChords?: boolean;
   lyricDisplayMode?: LyricDisplayMode;
+  sheetLayoutMode?: SheetLayoutMode;
   pinnedDictionMarks?: string[];
   autoScrollSettings?: AutoScrollSettings;
   sunoText?: string;
@@ -120,6 +121,8 @@ type SectionEntry = {
 };
 
 type LyricDisplayMode = "original" | "reading" | "vowel";
+
+type SheetLayoutMode = "lyricCard" | "staff";
 
 type AutoScrollMode = "seconds" | "bpm";
 
@@ -311,7 +314,8 @@ const SYSTEMS = [
 ];
 
 const SCORE_SCROLL_START = SYSTEMS[0].top;
-const SCORE_SCROLL_END = SYSTEMS[SYSTEMS.length - 1].top + SYSTEMS[SYSTEMS.length - 1].height;
+const SCORE_SCROLL_END =
+  SYSTEMS[SYSTEMS.length - 1].top + SYSTEMS[SYSTEMS.length - 1].height;
 
 const COLOR_SWATCHES = [
   "#0ea5e9",
@@ -406,35 +410,62 @@ const ART_SYMBOL_TOOL_IDS: ToolId[] = [
   "decrescendo"
 ];
 
-const DEFAULT_PINNED_DICTION_MARKS = ["K", "T", "S", "L", "th", "f", "v", "m"];
+const DEFAULT_PINNED_DICTION_MARKS = ["K", "G", "S", "T", "N", "H", "M", "R"];
 
 const AUDIO_DB_NAME = "vocal-sheet-music-audio";
 const AUDIO_STORE_NAME = "audio";
 const AUDIO_RECORD_ID = "current-song";
 
 const DICTION_MARKS = [
-  { value: "T", note: "タ行" },
-  { value: "S", note: "サ行" },
   { value: "K", note: "カ行" },
   { value: "G", note: "ガ行" },
-  { value: "P", note: "パ行" },
-  { value: "B", note: "バ行" },
+  { value: "S", note: "サ行" },
+  { value: "z", note: "ザ行" },
+  { value: "T", note: "タ行" },
   { value: "D", note: "ダ行" },
-  { value: "R", note: "ラ行" },
-  { value: "L", note: "L" },
   { value: "N", note: "ナ行" },
   { value: "H", note: "ハ行" },
+  { value: "B", note: "バ行" },
+  { value: "P", note: "パ行" },
+  { value: "m", note: "マ行" },
   { value: "Y", note: "ヤ行" },
+  { value: "R", note: "ラ行" },
+  { value: "L", note: "L/R" },
   { value: "W", note: "ワ行" },
-  { value: "th", note: "TH" },
   { value: "sh", note: "SH" },
   { value: "ch", note: "CH" },
   { value: "j", note: "J" },
-  { value: "z", note: "Z" },
+  { value: "th", note: "TH" },
   { value: "f", note: "F" },
   { value: "v", note: "V" },
-  { value: "m", note: "M" },
   { value: "ng", note: "NG" }
+];
+
+const DICTION_GROUPS = [
+  {
+    label: "日本語 50音順",
+    values: [
+      "K",
+      "G",
+      "S",
+      "z",
+      "T",
+      "D",
+      "N",
+      "H",
+      "B",
+      "P",
+      "m",
+      "Y",
+      "R",
+      "L",
+      "W"
+    ]
+  },
+  {
+    label: "英語・特殊",
+    values: ["sh", "ch", "j", "th", "f", "v", "ng"]
+  }
 ];
 
 const TOOL_BY_ID = SHEET_TOOLS.reduce(
@@ -749,6 +780,8 @@ export default function Home() {
   const [showChords, setShowChords] = useState(true);
   const [lyricDisplayMode, setLyricDisplayMode] =
     useState<LyricDisplayMode>("original");
+  const [sheetLayoutMode, setSheetLayoutMode] =
+    useState<SheetLayoutMode>("lyricCard");
   const [sections, setSections] = useState<SectionEntry[]>(DEFAULT_SECTIONS);
   const [sectionStartRow, setSectionStartRow] = useState(0);
   const [sectionEndRow, setSectionEndRow] = useState(1);
@@ -871,6 +904,7 @@ export default function Home() {
       sections,
       showChords,
       lyricDisplayMode,
+      sheetLayoutMode,
       pinnedDictionMarks,
       autoScrollSettings,
       sunoText
@@ -883,6 +917,7 @@ export default function Home() {
       pinnedDictionMarks,
       readingLyrics,
       sections,
+      sheetLayoutMode,
       showChords,
       sunoText,
       sourceLyrics,
@@ -1014,6 +1049,7 @@ export default function Home() {
     setSections(normalizeSections(nextDraft.sections));
     setShowChords(nextDraft.showChords ?? true);
     setLyricDisplayMode(nextDraft.lyricDisplayMode ?? "original");
+    setSheetLayoutMode(nextDraft.sheetLayoutMode ?? "lyricCard");
     setPinnedDictionMarks(
       Array.isArray(nextDraft.pinnedDictionMarks)
         ? nextDraft.pinnedDictionMarks
@@ -1181,6 +1217,7 @@ export default function Home() {
       sections: DEFAULT_SECTIONS,
       showChords: true,
       lyricDisplayMode: "original",
+      sheetLayoutMode: "lyricCard",
       pinnedDictionMarks: DEFAULT_PINNED_DICTION_MARKS,
       autoScrollSettings: DEFAULT_AUTO_SCROLL_SETTINGS,
       sunoText: ""
@@ -2285,6 +2322,21 @@ export default function Home() {
           </div>
 
           <div className="sheet-view-controls" aria-label="譜面表示">
+            <div className="segmented-control layout-mode-control">
+              {[
+                ["lyricCard", "歌詞カード"],
+                ["staff", "5線譜"]
+              ].map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={sheetLayoutMode === mode ? "active" : ""}
+                  onClick={() => setSheetLayoutMode(mode as SheetLayoutMode)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
             <div className="segmented-control">
               {[
                 ["original", "原文"],
@@ -2314,7 +2366,9 @@ export default function Home() {
           <div ref={scoreStageRef} className="score-stage">
             <div
               ref={sheetRef}
-              className={`score-page ${showChords ? "" : "hide-chords"}`}
+              className={`score-page layout-${sheetLayoutMode} ${
+                showChords ? "" : "hide-chords"
+              }`}
               onPointerDown={handleSheetPointerDown}
               onDragOver={(event) => event.preventDefault()}
               onDrop={handleDrop}
@@ -2382,6 +2436,14 @@ export default function Home() {
                           {measureLabel && <small>{measureLabel}</small>}
                         </span>
                         <span>コード</span>
+                      </div>
+                      <div className="staff-lines" aria-hidden="true">
+                        {[0, 1, 2, 3, 4].map((lineIndex) => (
+                          <span
+                            key={lineIndex}
+                            style={{ "--line-index": lineIndex } as CSSProperties}
+                          />
+                        ))}
                       </div>
                       <div className="note-writing-lane" aria-hidden="true" />
                       <div className="lyric-writing-lane" aria-hidden="true" />
@@ -2626,39 +2688,51 @@ export default function Home() {
                   ))}
                 </div>
                 <p className="preset-label">すべて</p>
-                <div className="diction-presets" aria-label="滑舌・発音候補">
-                  {DICTION_MARKS.map((mark) => {
-                    const isPinned = pinnedDictionMarks.includes(mark.value);
+                {DICTION_GROUPS.map((group) => (
+                  <div className="diction-group" key={group.label}>
+                    <p className="preset-label subtle">{group.label}</p>
+                    <div className="diction-presets" aria-label={group.label}>
+                      {group.values.map((value) => {
+                        const mark = DICTION_MARKS.find(
+                          (candidate) => candidate.value === value
+                        );
+                        if (!mark) {
+                          return null;
+                        }
 
-                    return (
-                      <div className="diction-option" key={mark.value}>
-                        <button
-                          type="button"
-                          className={`diction-mark-button ${
-                            dictionMark === mark.value ? "active" : ""
-                          }`}
-                          onClick={() => {
-                            setDictionMark(mark.value);
-                            setActiveTool("diction");
-                            setStatus(`${formatDictionMark(mark.value)}を入力`);
-                          }}
-                          title={mark.note}
-                        >
-                          <span>{mark.value}</span>
-                          <small>{mark.note}</small>
-                        </button>
-                        <button
-                          type="button"
-                          className={`pin-button ${isPinned ? "pinned" : ""}`}
-                          onClick={() => toggleDictionPin(mark.value)}
-                          title={isPinned ? "ピン止めを外す" : "ピン止め"}
-                        >
-                          <Pin size={12} />
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
+                        const isPinned = pinnedDictionMarks.includes(mark.value);
+
+                        return (
+                          <div className="diction-option" key={mark.value}>
+                            <button
+                              type="button"
+                              className={`diction-mark-button ${
+                                dictionMark === mark.value ? "active" : ""
+                              }`}
+                              onClick={() => {
+                                setDictionMark(mark.value);
+                                setActiveTool("diction");
+                                setStatus(`${formatDictionMark(mark.value)}を入力`);
+                              }}
+                              title={mark.note}
+                            >
+                              <span>{mark.value}</span>
+                              <small>{mark.note}</small>
+                            </button>
+                            <button
+                              type="button"
+                              className={`pin-button ${isPinned ? "pinned" : ""}`}
+                              onClick={() => toggleDictionPin(mark.value)}
+                              title={isPinned ? "ピン止めを外す" : "ピン止め"}
+                            >
+                              <Pin size={12} />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
 
                 <label className="field-label" htmlFor="sectionName">
                   セクション・録音メモ

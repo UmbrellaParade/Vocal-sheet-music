@@ -642,6 +642,7 @@ kbd {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 10px;
   margin-bottom: 12px;
   padding: 8px;
@@ -658,6 +659,10 @@ kbd {
   border: 1px solid var(--line);
   border-radius: 7px;
   background: #f8fafc;
+}
+
+.layout-mode-control {
+  grid-template-columns: repeat(2, minmax(86px, 1fr));
 }
 
 .segmented-control button {
@@ -873,6 +878,52 @@ kbd {
   color: #64748b;
   font-size: 8.5px;
   font-weight: 800;
+}
+
+.staff-lines {
+  display: none;
+}
+
+.score-page.layout-staff .system {
+  border-color: #cbd5e1;
+  background: #fff;
+}
+
+.score-page.layout-staff .staff-lines {
+  position: absolute;
+  left: 86px;
+  right: 18px;
+  top: 35%;
+  height: 32%;
+  display: block;
+}
+
+.score-page.layout-staff .staff-lines span {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(var(--line-index) * 25%);
+  height: 1px;
+  background: #334155;
+}
+
+.score-page.layout-staff .note-writing-lane {
+  top: 35%;
+  height: 32%;
+  border-top: 0;
+  border-bottom: 0;
+  background: transparent;
+}
+
+.score-page.layout-staff .note-writing-lane::before {
+  content: "5線";
+}
+
+.score-page.layout-staff .lyric-writing-lane {
+  bottom: 8%;
+  height: 14%;
+  border-bottom: 1px solid #cbd5e1;
+  background: transparent;
 }
 
 .lyric-writing-lane {
@@ -1215,6 +1266,16 @@ kbd {
   color: var(--muted);
   font-size: 11px;
   font-weight: 800;
+}
+
+.preset-label.subtle {
+  margin-top: 8px;
+  color: #475569;
+}
+
+.diction-group {
+  display: grid;
+  gap: 4px;
 }
 
 .diction-option {
