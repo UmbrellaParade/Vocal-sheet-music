@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ChevronDown,
   Download,
   Eraser,
   FileJson,
@@ -82,6 +83,8 @@ type DraftData = {
   readingLyrics: string;
   vowelLyrics: string;
 };
+
+type PanelId = "lyrics" | "tools" | "settings" | "inspector" | "cleanup";
 
 const STORAGE_KEY = "vocal-sheet-music:draft:v1";
 
@@ -205,11 +208,13 @@ const SHEET_TOOLS: ToolSpec[] = [
 ];
 
 const SYSTEMS = [
-  { top: 8, height: 13 },
-  { top: 25, height: 13 },
-  { top: 42, height: 13 },
-  { top: 59, height: 13 },
-  { top: 76, height: 13 }
+  { top: 8, height: 9.8 },
+  { top: 20.2, height: 9.8 },
+  { top: 32.4, height: 9.8 },
+  { top: 44.6, height: 9.8 },
+  { top: 56.8, height: 9.8 },
+  { top: 69, height: 9.8 },
+  { top: 81.2, height: 9.8 }
 ];
 
 const COLOR_SWATCHES = [
@@ -231,6 +236,7 @@ const DICTION_MARKS = [
   { value: "S", note: "サ行" },
   { value: "K", note: "カ行" },
   { value: "R", note: "ラ行" },
+  { value: "L", note: "L" },
   { value: "N", note: "ナ行" },
   { value: "th", note: "TH" },
   { value: "f", note: "F" },
@@ -287,11 +293,27 @@ export default function Home() {
   const [dictionMark, setDictionMark] = useState("T");
   const [status, setStatus] = useState("準備OK");
   const [isConverting, setIsConverting] = useState(false);
+  const [collapsedPanels, setCollapsedPanels] = useState<
+    Record<PanelId, boolean>
+  >({
+    lyrics: false,
+    tools: false,
+    settings: false,
+    inspector: false,
+    cleanup: false
+  });
 
   const selectedItem = useMemo(
     () => items.find((item) => item.id === selectedId),
     [items, selectedId]
   );
+
+  const togglePanel = useCallback((panelId: PanelId) => {
+    setCollapsedPanels((current) => ({
+      ...current,
+      [panelId]: !current[panelId]
+    }));
+  }, []);
 
   const draft = useMemo<DraftData>(
     () => ({
@@ -703,74 +725,89 @@ export default function Home() {
       <div className="workspace">
         <aside className="side-panel left-panel">
           <section className="panel-section">
-            <div className="section-heading">
+            <button
+              type="button"
+              className="section-heading section-toggle"
+              onClick={() => togglePanel("lyrics")}
+              aria-expanded={!collapsedPanels.lyrics}
+            >
               <Wand2 size={18} />
               <span>歌詞</span>
-            </div>
-            <label className="field-label" htmlFor="sourceLyrics">
-              原文
-            </label>
-            <textarea
-              id="sourceLyrics"
-              value={sourceLyrics}
-              onChange={(event) => setSourceLyrics(event.target.value)}
-              rows={5}
-            />
-            <div className="button-row">
-              <button
-                type="button"
-                className="control-button"
-                onClick={convertToReading}
-                disabled={isConverting}
-              >
-                <Type size={16} />
-                <span>{isConverting ? "変換中" : "ひらがな"}</span>
-              </button>
-              <button
-                type="button"
-                className="control-button"
-                onClick={convertReadingToVowels}
-              >
-                <FileJson size={16} />
-                <span>母音</span>
-              </button>
-            </div>
-
-            <label className="field-label" htmlFor="readingLyrics">
-              読み
-            </label>
-            <textarea
-              id="readingLyrics"
-              value={readingLyrics}
-              onChange={(event) => setReadingLyrics(event.target.value)}
-              rows={4}
-            />
-            <button
-              type="button"
-              className="wide-button"
-              onClick={() => placeTextOnSheet(readingLyrics, "lyric")}
-            >
-              <Plus size={16} />
-              <span>歌詞を配置</span>
+              <ChevronDown
+                className={`section-chevron ${
+                  collapsedPanels.lyrics ? "collapsed" : ""
+                }`}
+                size={18}
+              />
             </button>
+            {!collapsedPanels.lyrics && (
+              <>
+                <label className="field-label" htmlFor="sourceLyrics">
+                  原文
+                </label>
+                <textarea
+                  id="sourceLyrics"
+                  value={sourceLyrics}
+                  onChange={(event) => setSourceLyrics(event.target.value)}
+                  rows={5}
+                />
+                <div className="button-row">
+                  <button
+                    type="button"
+                    className="control-button"
+                    onClick={convertToReading}
+                    disabled={isConverting}
+                  >
+                    <Type size={16} />
+                    <span>{isConverting ? "変換中" : "ひらがな"}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="control-button"
+                    onClick={convertReadingToVowels}
+                  >
+                    <FileJson size={16} />
+                    <span>母音</span>
+                  </button>
+                </div>
 
-            <label className="field-label" htmlFor="vowelLyrics">
-              母音
-            </label>
-            <textarea
-              id="vowelLyrics"
-              value={vowelLyrics}
-              onChange={(event) => setVowelLyrics(event.target.value)}
-              rows={4}
-            />
-            <button
-              type="button"
-              className="wide-button"
-              onClick={() => placeTextOnSheet(vowelLyrics, "vowel")}
-            >
-              <Plus size={16} />
-              <span>母音を配置</span>
-            </button>
+                <label className="field-label" htmlFor="readingLyrics">
+                  読み
+                </label>
+                <textarea
+                  id="readingLyrics"
+                  value={readingLyrics}
+                  onChange={(event) => setReadingLyrics(event.target.value)}
+                  rows={4}
+                />
+                <button
+                  type="button"
+                  className="wide-button"
+                  onClick={() => placeTextOnSheet(readingLyrics, "lyric")}
+                >
+                  <Plus size={16} />
+                  <span>歌詞を配置</span>
+                </button>
+
+                <label className="field-label" htmlFor="vowelLyrics">
+                  母音
+                </label>
+                <textarea
+                  id="vowelLyrics"
+                  value={vowelLyrics}
+                  onChange={(event) => setVowelLyrics(event.target.value)}
+                  rows={4}
+                />
+                <button
+                  type="button"
+                  className="wide-button"
+                  onClick={() => placeTextOnSheet(vowelLyrics, "vowel")}
+                >
+                  <Plus size={16} />
+                  <span>母音を配置</span>
+                </button>
+              </>
+            )}
           </section>
         </aside>
 
@@ -823,13 +860,14 @@ export default function Home() {
                     height: `${system.height}%`
                   }}
                 >
-                  <div className="chord-lane">
-                    {Array.from({ length: 4 }, (_, index) => (
-                      <span key={index}>{systemIndex * 4 + index + 1}</span>
-                    ))}
+                  <div className="phrase-row-header">
+                    <span>{systemIndex + 1}</span>
+                    <span>コード</span>
+                    <span>歌詞</span>
+                    <span>記号</span>
                   </div>
-                  <div className="staff-lines" aria-hidden="true" />
-                  <div className="lyric-lane" aria-hidden="true" />
+                  <div className="lyric-writing-lane" aria-hidden="true" />
+                  <div className="note-writing-lane" aria-hidden="true" />
                 </div>
               ))}
 
@@ -869,168 +907,208 @@ export default function Home() {
 
         <aside className="side-panel right-panel">
           <section className="panel-section tool-palette">
-            <div className="section-heading">
+            <button
+              type="button"
+              className="section-heading section-toggle"
+              onClick={() => togglePanel("tools")}
+              aria-expanded={!collapsedPanels.tools}
+            >
               <Keyboard size={18} />
               <span>記号</span>
-            </div>
-            <div className="tool-grid">
-              {SHEET_TOOLS.map((tool) => (
-                <button
-                  key={tool.id}
-                  type="button"
-                  draggable
-                  className={`tool-button tool-${tool.id} ${
-                    activeTool === tool.id ? "active" : ""
-                  }`}
-                  style={{ "--tool-color": tool.color } as CSSProperties}
-                  onClick={() => setActiveTool(tool.id)}
-                  onDragStart={(event) => {
-                    event.dataTransfer.effectAllowed = "copy";
-                    event.dataTransfer.setData("application/x-vocal-tool", tool.id);
-                  }}
-                  title={`${tool.name} ${tool.shortcut}`}
-                >
-                  <span className="tool-symbol">{tool.label}</span>
-                  <span className="tool-name">{tool.name}</span>
-                  <kbd>{tool.shortcut}</kbd>
-                </button>
-              ))}
-            </div>
+              <ChevronDown
+                className={`section-chevron ${
+                  collapsedPanels.tools ? "collapsed" : ""
+                }`}
+                size={18}
+              />
+            </button>
+            {!collapsedPanels.tools && (
+              <div className="tool-grid">
+                {SHEET_TOOLS.map((tool) => (
+                  <button
+                    key={tool.id}
+                    type="button"
+                    draggable
+                    className={`tool-button tool-${tool.id} ${
+                      activeTool === tool.id ? "active" : ""
+                    }`}
+                    style={{ "--tool-color": tool.color } as CSSProperties}
+                    onClick={() => setActiveTool(tool.id)}
+                    onDragStart={(event) => {
+                      event.dataTransfer.effectAllowed = "copy";
+                      event.dataTransfer.setData("application/x-vocal-tool", tool.id);
+                    }}
+                    title={`${tool.name} ${tool.shortcut}`}
+                  >
+                    <span className="tool-symbol">{tool.label}</span>
+                    <span className="tool-name">{tool.name}</span>
+                    <kbd>{tool.shortcut}</kbd>
+                  </button>
+                ))}
+              </div>
+            )}
           </section>
 
           <section className="panel-section">
-            <div className="section-heading">
+            <button
+              type="button"
+              className="section-heading section-toggle"
+              onClick={() => togglePanel("settings")}
+              aria-expanded={!collapsedPanels.settings}
+            >
               <SlidersHorizontal size={18} />
               <span>譜面設定</span>
-            </div>
-            <label className="field-label" htmlFor="quickChord">
-              コードネーム
-            </label>
-            <div className="inline-form">
-              <input
-                id="quickChord"
-                aria-label="コードネーム"
-                placeholder="Cmaj7 / Am7 / G7"
-                value={quickChord}
-                onChange={(event) => {
-                  setQuickChord(event.target.value);
-                  setActiveTool("chord");
-                }}
-                onFocus={() => setActiveTool("chord")}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    addQuickChord();
-                  }
-                }}
+              <ChevronDown
+                className={`section-chevron ${
+                  collapsedPanels.settings ? "collapsed" : ""
+                }`}
+                size={18}
               />
-              <button
-                type="button"
-                className="square-button"
-                onClick={addQuickChord}
-                title="コードネームを譜面へ追加"
-              >
-                <Plus size={18} />
-              </button>
-            </div>
-            <div className="chord-presets" aria-label="よく使うコード">
-              {COMMON_CHORDS.map((chord) => (
-                <button
-                  key={chord}
-                  type="button"
-                  onClick={() => {
-                    setQuickChord(chord);
-                    setActiveTool("chord");
-                    setStatus(`${chord}を入力`);
-                  }}
-                >
-                  {chord}
-                </button>
-              ))}
-            </div>
+            </button>
+            {!collapsedPanels.settings && (
+              <>
+                <label className="field-label" htmlFor="quickChord">
+                  コードネーム
+                </label>
+                <div className="inline-form">
+                  <input
+                    id="quickChord"
+                    aria-label="コードネーム"
+                    placeholder="Cmaj7 / Am7 / G7"
+                    value={quickChord}
+                    onChange={(event) => {
+                      setQuickChord(event.target.value);
+                      setActiveTool("chord");
+                    }}
+                    onFocus={() => setActiveTool("chord")}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        addQuickChord();
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="square-button"
+                    onClick={addQuickChord}
+                    title="コードネームを譜面へ追加"
+                  >
+                    <Plus size={18} />
+                  </button>
+                </div>
+                <div className="chord-presets" aria-label="よく使うコード">
+                  {COMMON_CHORDS.map((chord) => (
+                    <button
+                      key={chord}
+                      type="button"
+                      onClick={() => {
+                        setQuickChord(chord);
+                        setActiveTool("chord");
+                        setStatus(`${chord}を入力`);
+                      }}
+                    >
+                      {chord}
+                    </button>
+                  ))}
+                </div>
 
-            <label className="field-label" htmlFor="dictionMark">
-              滑舌・発音マーカー
-            </label>
-            <div className="inline-form">
-              <input
-                id="dictionMark"
-                aria-label="滑舌・発音マーカー"
-                value={dictionMark}
-                onChange={(event) => {
-                  setDictionMark(event.target.value);
-                  setActiveTool("diction");
-                }}
-                onFocus={() => setActiveTool("diction")}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    const markIndex =
-                      items.filter((item) => item.toolId === "diction").length % 4;
-                    addItemAt(
-                      "diction",
-                      16 + markIndex * 18,
-                      SYSTEMS[1].top + SYSTEMS[1].height - 2,
-                      dictionMark
-                    );
-                  }
-                }}
-              />
-              <button
-                type="button"
-                className="square-button"
-                onClick={() => {
-                  const markIndex =
-                    items.filter((item) => item.toolId === "diction").length % 4;
-                  addItemAt(
-                    "diction",
-                    16 + markIndex * 18,
-                    SYSTEMS[1].top + SYSTEMS[1].height - 2,
-                    dictionMark
-                  );
-                }}
-                title="滑舌・発音マーカーを譜面へ追加"
-              >
-                <Plus size={18} />
-              </button>
-            </div>
-            <div className="diction-presets" aria-label="滑舌・発音候補">
-              {DICTION_MARKS.map((mark) => (
-                <button
-                  key={mark.value}
-                  type="button"
-                  className={dictionMark === mark.value ? "active" : ""}
-                  onClick={() => {
-                    setDictionMark(mark.value);
-                    setActiveTool("diction");
-                    setStatus(`${mark.value}を入力`);
-                  }}
-                  title={mark.note}
-                >
-                  <span>{mark.value}</span>
-                  <small>{mark.note}</small>
-                </button>
-              ))}
-            </div>
+                <label className="field-label" htmlFor="dictionMark">
+                  滑舌・発音マーカー
+                </label>
+                <div className="inline-form">
+                  <input
+                    id="dictionMark"
+                    aria-label="滑舌・発音マーカー"
+                    value={dictionMark}
+                    onChange={(event) => {
+                      setDictionMark(event.target.value);
+                      setActiveTool("diction");
+                    }}
+                    onFocus={() => setActiveTool("diction")}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        const markIndex =
+                          items.filter((item) => item.toolId === "diction").length %
+                          4;
+                        addItemAt(
+                          "diction",
+                          16 + markIndex * 18,
+                          SYSTEMS[1].top + SYSTEMS[1].height - 2,
+                          dictionMark
+                        );
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="square-button"
+                    onClick={() => {
+                      const markIndex =
+                        items.filter((item) => item.toolId === "diction").length % 4;
+                      addItemAt(
+                        "diction",
+                        16 + markIndex * 18,
+                        SYSTEMS[1].top + SYSTEMS[1].height - 2,
+                        dictionMark
+                      );
+                    }}
+                    title="滑舌・発音マーカーを譜面へ追加"
+                  >
+                    <Plus size={18} />
+                  </button>
+                </div>
+                <div className="diction-presets" aria-label="滑舌・発音候補">
+                  {DICTION_MARKS.map((mark) => (
+                    <button
+                      key={mark.value}
+                      type="button"
+                      className={dictionMark === mark.value ? "active" : ""}
+                      onClick={() => {
+                        setDictionMark(mark.value);
+                        setActiveTool("diction");
+                        setStatus(`${mark.value}を入力`);
+                      }}
+                      title={mark.note}
+                    >
+                      <span>{mark.value}</span>
+                      <small>{mark.note}</small>
+                    </button>
+                  ))}
+                </div>
 
-            <label className="field-label" htmlFor="memo">
-              メモ
-            </label>
-            <textarea
-              id="memo"
-              value={meta.memo}
-              onChange={(event) => updateMeta("memo", event.target.value)}
-              rows={4}
-            />
+                <label className="field-label" htmlFor="memo">
+                  メモ
+                </label>
+                <textarea
+                  id="memo"
+                  value={meta.memo}
+                  onChange={(event) => updateMeta("memo", event.target.value)}
+                  rows={4}
+                />
+              </>
+            )}
           </section>
 
           <section className="panel-section">
-            <div className="section-heading">
+            <button
+              type="button"
+              className="section-heading section-toggle"
+              onClick={() => togglePanel("inspector")}
+              aria-expanded={!collapsedPanels.inspector}
+            >
               <Music2 size={18} />
               <span>選択中</span>
-            </div>
+              <ChevronDown
+                className={`section-chevron ${
+                  collapsedPanels.inspector ? "collapsed" : ""
+                }`}
+                size={18}
+              />
+            </button>
 
-            {selectedItem ? (
+            {!collapsedPanels.inspector && selectedItem ? (
               <div className="inspector">
                 <label className="field-label" htmlFor="itemLabel">
                   表示
@@ -1091,20 +1169,33 @@ export default function Home() {
                   </button>
                 </div>
               </div>
-            ) : (
+            ) : !collapsedPanels.inspector ? (
               <p className="empty-state">未選択</p>
-            )}
+            ) : null}
           </section>
 
           <section className="panel-section">
-            <div className="section-heading">
+            <button
+              type="button"
+              className="section-heading section-toggle"
+              onClick={() => togglePanel("cleanup")}
+              aria-expanded={!collapsedPanels.cleanup}
+            >
               <RotateCcw size={18} />
               <span>整理</span>
-            </div>
-            <button type="button" className="wide-button neutral" onClick={resetSheet}>
-              <Eraser size={16} />
-              <span>譜面を空にする</span>
+              <ChevronDown
+                className={`section-chevron ${
+                  collapsedPanels.cleanup ? "collapsed" : ""
+                }`}
+                size={18}
+              />
             </button>
+            {!collapsedPanels.cleanup && (
+              <button type="button" className="wide-button neutral" onClick={resetSheet}>
+                <Eraser size={16} />
+                <span>譜面を空にする</span>
+              </button>
+            )}
           </section>
         </aside>
       </div>
