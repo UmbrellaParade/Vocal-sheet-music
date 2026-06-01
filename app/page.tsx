@@ -243,7 +243,7 @@ const SHEET_TOOLS: ToolSpec[] = [
     label: "W",
     shortcut: "V",
     color: "#22a85a",
-    size: 30,
+    size: 23,
     kind: "symbol"
   },
   {
@@ -252,7 +252,7 @@ const SHEET_TOOLS: ToolSpec[] = [
     label: "V",
     shortcut: "B",
     color: "#60a5fa",
-    size: 26,
+    size: 21,
     kind: "symbol"
   },
   {
@@ -261,7 +261,7 @@ const SHEET_TOOLS: ToolSpec[] = [
     label: "↗",
     shortcut: "S",
     color: "#dc2626",
-    size: 28,
+    size: 22,
     kind: "symbol"
   },
   {
@@ -270,7 +270,7 @@ const SHEET_TOOLS: ToolSpec[] = [
     label: "↘",
     shortcut: "F",
     color: "#9333ea",
-    size: 28,
+    size: 22,
     kind: "symbol"
   },
   {
@@ -279,7 +279,7 @@ const SHEET_TOOLS: ToolSpec[] = [
     label: "○",
     shortcut: "U",
     color: "#0891b2",
-    size: 30,
+    size: 23,
     kind: "symbol"
   },
   {
@@ -288,7 +288,7 @@ const SHEET_TOOLS: ToolSpec[] = [
     label: ">",
     shortcut: "A",
     color: "#fb7185",
-    size: 28,
+    size: 22,
     kind: "symbol"
   },
   {
@@ -297,7 +297,7 @@ const SHEET_TOOLS: ToolSpec[] = [
     label: "活K",
     shortcut: "K",
     color: "#f97316",
-    size: 24,
+    size: 18,
     kind: "symbol"
   },
   {
@@ -306,7 +306,7 @@ const SHEET_TOOLS: ToolSpec[] = [
     label: "━",
     shortcut: "H",
     color: "#facc15",
-    size: 28,
+    size: 22,
     kind: "symbol"
   },
   {
@@ -315,7 +315,7 @@ const SHEET_TOOLS: ToolSpec[] = [
     label: "<",
     shortcut: "Q",
     color: "#334155",
-    size: 34,
+    size: 25,
     kind: "symbol"
   },
   {
@@ -324,7 +324,7 @@ const SHEET_TOOLS: ToolSpec[] = [
     label: ">",
     shortcut: "E",
     color: "#334155",
-    size: 34,
+    size: 25,
     kind: "symbol"
   },
   {
@@ -346,6 +346,19 @@ const SHEET_TOOLS: ToolSpec[] = [
     kind: "text"
   }
 ];
+
+const LEGACY_SYMBOL_SIZE_BY_ID: Partial<Record<ToolId, number>> = {
+  vibrato: 30,
+  breath: 26,
+  scoop: 28,
+  fall: 28,
+  kobushi: 30,
+  accent: 28,
+  diction: 24,
+  hold: 28,
+  crescendo: 34,
+  decrescendo: 34
+};
 
 const SYSTEMS = [
   { top: 8, height: 9.8 },
@@ -960,6 +973,23 @@ function isToolId(value: string): value is ToolId {
   return value in TOOL_BY_ID;
 }
 
+function normalizeDraftItems(items: SheetItem[]) {
+  return items.map((item) => {
+    const tool = TOOL_BY_ID[item.toolId];
+    const legacySymbolSize = LEGACY_SYMBOL_SIZE_BY_ID[item.toolId];
+
+    if (
+      tool?.kind === "symbol" &&
+      legacySymbolSize &&
+      item.size === legacySymbolSize
+    ) {
+      return { ...item, size: tool.size };
+    }
+
+    return item;
+  });
+}
+
 function isArtSymbolTool(toolId: ToolId) {
   return ART_SYMBOL_TOOL_IDS.includes(toolId);
 }
@@ -1364,7 +1394,9 @@ export default function Home() {
 
   const hydrateDraft = useCallback((nextDraft: Partial<DraftData>) => {
     setMeta({ ...DEFAULT_META, ...(nextDraft.meta ?? {}) });
-    setItems(Array.isArray(nextDraft.items) ? nextDraft.items : []);
+    setItems(
+      Array.isArray(nextDraft.items) ? normalizeDraftItems(nextDraft.items) : []
+    );
     setSourceLyrics(nextDraft.sourceLyrics ?? "");
     setReadingLyrics(nextDraft.readingLyrics ?? "");
     setVowelLyrics(nextDraft.vowelLyrics ?? "");
@@ -2366,7 +2398,7 @@ export default function Home() {
 
       <div className="workspace">
         <aside className="side-panel left-panel">
-          <section className="panel-section">
+          <section className="panel-section lyric-panel">
             <button
               type="button"
               className="section-heading section-toggle"
@@ -2389,9 +2421,10 @@ export default function Home() {
                 </label>
                 <textarea
                   id="sourceLyrics"
+                  className="lyrics-textarea source-lyrics-textarea"
                   value={sourceLyrics}
                   onChange={(event) => setSourceLyrics(event.target.value)}
-                  rows={5}
+                  rows={8}
                 />
                 <div className="button-row">
                   <button
@@ -2418,9 +2451,10 @@ export default function Home() {
                 </label>
                 <textarea
                   id="readingLyrics"
+                  className="lyrics-textarea"
                   value={readingLyrics}
                   onChange={(event) => setReadingLyrics(event.target.value)}
-                  rows={4}
+                  rows={5}
                 />
                 <button
                   type="button"
@@ -2438,9 +2472,10 @@ export default function Home() {
                 </label>
                 <textarea
                   id="vowelLyrics"
+                  className="lyrics-textarea compact-lyrics-textarea"
                   value={vowelLyrics}
                   onChange={(event) => setVowelLyrics(event.target.value)}
-                  rows={4}
+                  rows={5}
                 />
                 <button
                   type="button"
