@@ -114,8 +114,8 @@ const SHEET_TOOLS: ToolSpec[] = [
   },
   {
     id: "chord",
-    name: "コード",
-    label: "C",
+    name: "コード名",
+    label: "C7",
     shortcut: "C",
     color: "#f59e0b",
     size: 20,
@@ -224,6 +224,8 @@ const COLOR_SWATCHES = [
   "#f8fafc"
 ];
 
+const COMMON_CHORDS = ["C", "Dm7", "Em7", "F", "G7", "Am7", "Bm7-5"];
+
 const TOOL_BY_ID = SHEET_TOOLS.reduce(
   (lookup, tool) => ({ ...lookup, [tool.id]: tool }),
   {} as Record<ToolId, ToolSpec>
@@ -304,10 +306,12 @@ export default function Home() {
   const addItemAt = useCallback(
     (toolId: ToolId, x: number, y: number, labelOverride?: string) => {
       const tool = TOOL_BY_ID[toolId];
+      const label =
+        labelOverride || (toolId === "chord" ? quickChord.trim() || "C" : tool.label);
       const item: SheetItem = {
         id: createId(),
         toolId,
-        label: labelOverride || tool.label,
+        label,
         x,
         y,
         size: tool.size,
@@ -318,7 +322,7 @@ export default function Home() {
       setSelectedId(item.id);
       setStatus(`${tool.name}を追加`);
     },
-    []
+    [quickChord]
   );
 
   const hydrateDraft = useCallback((nextDraft: Partial<DraftData>) => {
@@ -881,6 +885,52 @@ export default function Home() {
               <SlidersHorizontal size={18} />
               <span>譜面設定</span>
             </div>
+            <label className="field-label" htmlFor="quickChord">
+              コードネーム
+            </label>
+            <div className="inline-form">
+              <input
+                id="quickChord"
+                aria-label="コードネーム"
+                placeholder="Cmaj7 / Am7 / G7"
+                value={quickChord}
+                onChange={(event) => {
+                  setQuickChord(event.target.value);
+                  setActiveTool("chord");
+                }}
+                onFocus={() => setActiveTool("chord")}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    addQuickChord();
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="square-button"
+                onClick={addQuickChord}
+                title="コードネームを譜面へ追加"
+              >
+                <Plus size={18} />
+              </button>
+            </div>
+            <div className="chord-presets" aria-label="よく使うコード">
+              {COMMON_CHORDS.map((chord) => (
+                <button
+                  key={chord}
+                  type="button"
+                  onClick={() => {
+                    setQuickChord(chord);
+                    setActiveTool("chord");
+                    setStatus(`${chord}を入力`);
+                  }}
+                >
+                  {chord}
+                </button>
+              ))}
+            </div>
+
             <label className="field-label" htmlFor="memo">
               メモ
             </label>
@@ -890,20 +940,6 @@ export default function Home() {
               onChange={(event) => updateMeta("memo", event.target.value)}
               rows={4}
             />
-
-            <label className="field-label" htmlFor="quickChord">
-              コード
-            </label>
-            <div className="inline-form">
-              <input
-                id="quickChord"
-                value={quickChord}
-                onChange={(event) => setQuickChord(event.target.value)}
-              />
-              <button type="button" className="square-button" onClick={addQuickChord}>
-                <Plus size={18} />
-              </button>
-            </div>
           </section>
 
           <section className="panel-section">

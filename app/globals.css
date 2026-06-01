@@ -578,16 +578,15 @@ kbd {
 }
 
 .sheet-chord {
-  min-width: 38px;
-  color: #fff7ed;
-  border-color: #fed7aa;
-  background:
-    linear-gradient(180deg, #f59e0b, #b45309);
+  min-width: auto;
+  color: #b45309;
+  border-color: transparent;
+  background: transparent;
   font-weight: 900;
-  text-shadow: 0 1px 0 #7c2d12;
-  box-shadow:
-    0 0 0 1px rgba(251, 191, 36, 0.24),
-    0 8px 18px rgba(180, 83, 9, 0.22);
+  text-shadow:
+    0 0 3px rgba(255, 255, 255, 0.95),
+    0 1px 0 rgba(255, 247, 237, 0.92);
+  box-shadow: none;
 }
 
 .sheet-symbol.tool-vibrato {
@@ -653,9 +652,42 @@ kbd {
     0 1px 1px rgba(2, 6, 23, 0.7);
 }
 
+.sheet-chord.selected {
+  border-color: transparent;
+  box-shadow: none;
+  text-decoration: underline;
+  text-decoration-color: rgba(250, 204, 21, 0.9);
+  text-decoration-thickness: 3px;
+  text-underline-offset: 4px;
+}
+
 .inspector {
   display: grid;
   gap: 4px;
+}
+
+.chord-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.chord-presets button {
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid #fed7aa;
+  border-radius: 6px;
+  color: #9a3412;
+  background: #fff7ed;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.chord-presets button:hover {
+  border-color: #f59e0b;
+  background: #ffedd5;
 }
 
 .swatches {
