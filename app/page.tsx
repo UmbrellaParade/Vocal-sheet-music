@@ -133,10 +133,10 @@ const SHEET_TOOLS: ToolSpec[] = [
   {
     id: "breath",
     name: "ブレス",
-    label: ",",
+    label: "V",
     shortcut: "B",
     color: "#60a5fa",
-    size: 34,
+    size: 26,
     kind: "symbol"
   },
   {
@@ -169,7 +169,7 @@ const SHEET_TOOLS: ToolSpec[] = [
   {
     id: "diction",
     name: "滑舌注意",
-    label: "舌!",
+    label: "T",
     shortcut: "K",
     color: "#f97316",
     size: 24,
@@ -226,6 +226,18 @@ const COLOR_SWATCHES = [
 
 const COMMON_CHORDS = ["C", "Dm7", "Em7", "F", "G7", "Am7", "Bm7-5"];
 
+const DICTION_MARKS = [
+  { value: "T", note: "タ行" },
+  { value: "S", note: "サ行" },
+  { value: "K", note: "カ行" },
+  { value: "R", note: "ラ行" },
+  { value: "N", note: "ナ行" },
+  { value: "th", note: "TH" },
+  { value: "f", note: "F" },
+  { value: "v", note: "V" },
+  { value: "m", note: "M" }
+];
+
 const TOOL_BY_ID = SHEET_TOOLS.reduce(
   (lookup, tool) => ({ ...lookup, [tool.id]: tool }),
   {} as Record<ToolId, ToolSpec>
@@ -272,6 +284,7 @@ export default function Home() {
   const [readingLyrics, setReadingLyrics] = useState("");
   const [vowelLyrics, setVowelLyrics] = useState("");
   const [quickChord, setQuickChord] = useState("C");
+  const [dictionMark, setDictionMark] = useState("T");
   const [status, setStatus] = useState("準備OK");
   const [isConverting, setIsConverting] = useState(false);
 
@@ -307,7 +320,12 @@ export default function Home() {
     (toolId: ToolId, x: number, y: number, labelOverride?: string) => {
       const tool = TOOL_BY_ID[toolId];
       const label =
-        labelOverride || (toolId === "chord" ? quickChord.trim() || "C" : tool.label);
+        labelOverride ||
+        (toolId === "chord"
+          ? quickChord.trim() || "C"
+          : toolId === "diction"
+            ? dictionMark.trim() || "T"
+            : tool.label);
       const item: SheetItem = {
         id: createId(),
         toolId,
@@ -322,7 +340,7 @@ export default function Home() {
       setSelectedId(item.id);
       setStatus(`${tool.name}を追加`);
     },
-    [quickChord]
+    [dictionMark, quickChord]
   );
 
   const hydrateDraft = useCallback((nextDraft: Partial<DraftData>) => {
@@ -927,6 +945,70 @@ export default function Home() {
                   }}
                 >
                   {chord}
+                </button>
+              ))}
+            </div>
+
+            <label className="field-label" htmlFor="dictionMark">
+              滑舌・発音マーカー
+            </label>
+            <div className="inline-form">
+              <input
+                id="dictionMark"
+                aria-label="滑舌・発音マーカー"
+                value={dictionMark}
+                onChange={(event) => {
+                  setDictionMark(event.target.value);
+                  setActiveTool("diction");
+                }}
+                onFocus={() => setActiveTool("diction")}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    const markIndex =
+                      items.filter((item) => item.toolId === "diction").length % 4;
+                    addItemAt(
+                      "diction",
+                      16 + markIndex * 18,
+                      SYSTEMS[1].top + SYSTEMS[1].height - 2,
+                      dictionMark
+                    );
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="square-button"
+                onClick={() => {
+                  const markIndex =
+                    items.filter((item) => item.toolId === "diction").length % 4;
+                  addItemAt(
+                    "diction",
+                    16 + markIndex * 18,
+                    SYSTEMS[1].top + SYSTEMS[1].height - 2,
+                    dictionMark
+                  );
+                }}
+                title="滑舌・発音マーカーを譜面へ追加"
+              >
+                <Plus size={18} />
+              </button>
+            </div>
+            <div className="diction-presets" aria-label="滑舌・発音候補">
+              {DICTION_MARKS.map((mark) => (
+                <button
+                  key={mark.value}
+                  type="button"
+                  className={dictionMark === mark.value ? "active" : ""}
+                  onClick={() => {
+                    setDictionMark(mark.value);
+                    setActiveTool("diction");
+                    setStatus(`${mark.value}を入力`);
+                  }}
+                  title={mark.note}
+                >
+                  <span>{mark.value}</span>
+                  <small>{mark.note}</small>
                 </button>
               ))}
             </div>
