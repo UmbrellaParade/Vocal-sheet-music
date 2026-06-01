@@ -59,9 +59,10 @@ type ToolId =
   | "crescendo"
   | "decrescendo"
   | "dynamic"
-  | "marker";
+  | "marker"
+  | "note";
 
-type ToolKind = "text" | "symbol" | "chord";
+type ToolKind = "text" | "symbol" | "chord" | "note";
 
 type ToolSpec = {
   id: ToolId;
@@ -83,6 +84,8 @@ type SheetItem = {
   color: string;
   highlightColor?: string;
   comment?: string;
+  pitch?: number;
+  durationTicks?: number;
 };
 
 type SheetMeta = {
@@ -106,6 +109,7 @@ type DraftData = {
   pinnedDictionMarks?: string[];
   autoScrollSettings?: AutoScrollSettings;
   sunoText?: string;
+  midiMeasuresPerRow?: string;
 };
 
 type SectionEntry = {
@@ -135,10 +139,41 @@ type AutoScrollSettings = {
   followAudio: boolean;
 };
 
+type ParsedMidiNote = {
+  pitch: number;
+  velocity: number;
+  startTick: number;
+  endTick: number;
+  channel: number;
+  track: number;
+};
+
+type ParsedMidi = {
+  ppq: number;
+  notes: ParsedMidiNote[];
+  timeSignature: {
+    numerator: number;
+    denominator: number;
+  };
+  name?: string;
+};
+
+type MidiInputLike = {
+  name?: string | null;
+  onmidimessage: ((this: any, event: any) => unknown) | null;
+};
+
+type MidiAccessLike = {
+  inputs: {
+    values: () => IterableIterator<MidiInputLike>;
+  };
+};
+
 type PanelId =
   | "lyrics"
   | "suno"
   | "audio"
+  | "midi"
   | "scroll"
   | "share"
   | "tools"
@@ -192,6 +227,15 @@ const SHEET_TOOLS: ToolSpec[] = [
     color: "#f59e0b",
     size: 20,
     kind: "chord"
+  },
+  {
+    id: "note",
+    name: "音符",
+    label: "♪",
+    shortcut: "N",
+    color: "#111827",
+    size: 18,
+    kind: "note"
   },
   {
     id: "vibrato",
@@ -632,6 +676,254 @@ function getSunoMetaTag(sectionName: string) {
   return `[${sectionName.trim() || "Section"}]`;
 }
 
+const PITCH_CLASS_NAMES = [
+  "C",
+  "C#",
+  "D",
+  "D#",
+  "E",
+  "F",
+  "F#",
+  "G",
+  "G#",
+  "A",
+  "A#",
+  "B"
+];
+
+const PITCH_TO_DIATONIC_STEP = [0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6];
+
+class MidiReader {
+  private offset = 0;
+
+  constructor(private readonly view: DataView) {}
+
+  get position() {
+    return this.offset;
+  }
+
+  set position(nextOffset: number) {
+    this.offset = nextOffset;
+  }
+
+  readUint8() {
+    const value = this.view.getUint8(this.offset);
+    this.offset += 1;
+    return value;
+  }
+
+  readUint16() {
+    const value = this.view.getUint16(this.offset);
+    this.offset += 2;
+    return value;
+  }
+
+  readUint32() {
+    const value = this.view.getUint32(this.offset);
+    this.offset += 4;
+    return value;
+  }
+
+  readString(length: number) {
+    let value = "";
+    for (let index = 0; index < length; index += 1) {
+      value += String.fromCharCode(this.readUint8());
+    }
+    return value;
+  }
+
+  readVariableLength() {
+    let value = 0;
+    let byte = 0;
+
+    do {
+      byte = this.readUint8();
+      value = (value << 7) | (byte & 0x7f);
+    } while (byte & 0x80);
+
+    return value;
+  }
+
+  skip(length: number) {
+    this.offset += length;
+  }
+}
+
+function midiPitchName(pitch: number) {
+  return `${PITCH_CLASS_NAMES[pitch % 12]}${Math.floor(pitch / 12) - 1}`;
+}
+
+function midiPitchToStaffY(pitch: number, rowIndex: number) {
+  const system = SYSTEMS[rowIndex] ?? SYSTEMS[0];
+  const staffTop = system.top + system.height * 0.35;
+  const staffHeight = system.height * 0.32;
+  const pitchClass = pitch % 12;
+  const octave = Math.floor(pitch / 12) - 1;
+  const noteStep = octave * 7 + PITCH_TO_DIATONIC_STEP[pitchClass];
+  const topStep = 5 * 7 + 3;
+  const relative = (topStep - noteStep) / 8;
+
+  return clamp(staffTop + staffHeight * relative, system.top + 2.8, system.top + system.height - 1.4);
+}
+
+function parseMidiFile(buffer: ArrayBuffer): ParsedMidi {
+  const reader = new MidiReader(new DataView(buffer));
+  const headerId = reader.readString(4);
+  if (headerId !== "MThd") {
+    throw new Error("MIDIヘッダーが見つかりません");
+  }
+
+  const headerLength = reader.readUint32();
+  reader.readUint16();
+  const trackCount = reader.readUint16();
+  const division = reader.readUint16();
+
+  if (division & 0x8000) {
+    throw new Error("SMPTE形式のMIDIにはまだ対応していません");
+  }
+
+  reader.skip(Math.max(headerLength - 6, 0));
+
+  const notes: ParsedMidiNote[] = [];
+  const activeNotes = new Map<
+    string,
+    Array<{ startTick: number; velocity: number; track: number }>
+  >();
+  let timeSignature = { numerator: 4, denominator: 4 };
+  let name = "";
+
+  for (let trackIndex = 0; trackIndex < trackCount; trackIndex += 1) {
+    const trackId = reader.readString(4);
+    if (trackId !== "MTrk") {
+      throw new Error("MIDIトラックが見つかりません");
+    }
+
+    const trackEnd = reader.position + reader.readUint32();
+    let tick = 0;
+    let runningStatus = 0;
+
+    while (reader.position < trackEnd) {
+      tick += reader.readVariableLength();
+      let status = reader.readUint8();
+
+      if (status < 0x80) {
+        reader.position -= 1;
+        status = runningStatus;
+      } else if (status < 0xf0) {
+        runningStatus = status;
+      }
+
+      if (status === 0xff) {
+        const metaType = reader.readUint8();
+        const length = reader.readVariableLength();
+        const metaStart = reader.position;
+
+        if (metaType === 0x03) {
+          name ||= reader.readString(length);
+        } else if (metaType === 0x58 && length >= 2) {
+          const numerator = reader.readUint8();
+          const denominatorPower = reader.readUint8();
+          timeSignature = {
+            numerator,
+            denominator: 2 ** denominatorPower
+          };
+        }
+
+        reader.position = metaStart + length;
+        continue;
+      }
+
+      if (status === 0xf0 || status === 0xf7) {
+        reader.skip(reader.readVariableLength());
+        continue;
+      }
+
+      const eventType = status & 0xf0;
+      const channel = status & 0x0f;
+      const firstData = reader.readUint8();
+      const needsSecondData = ![0xc0, 0xd0].includes(eventType);
+      const secondData = needsSecondData ? reader.readUint8() : 0;
+
+      if (eventType !== 0x90 && eventType !== 0x80) {
+        continue;
+      }
+
+      const key = `${channel}:${firstData}`;
+      const noteStack = activeNotes.get(key) ?? [];
+
+      if (eventType === 0x90 && secondData > 0) {
+        activeNotes.set(key, [
+          ...noteStack,
+          { startTick: tick, velocity: secondData, track: trackIndex }
+        ]);
+      } else {
+        const started = noteStack.shift();
+        if (started) {
+          notes.push({
+            pitch: firstData,
+            velocity: started.velocity,
+            startTick: started.startTick,
+            endTick: tick,
+            channel,
+            track: started.track
+          });
+        }
+        activeNotes.set(key, noteStack);
+      }
+    }
+
+    reader.position = trackEnd;
+  }
+
+  return {
+    ppq: division,
+    notes: notes.sort((a, b) => a.startTick - b.startTick || a.pitch - b.pitch),
+    timeSignature,
+    name
+  };
+}
+
+function detectChordName(pitches: number[]) {
+  const pitchClasses = [...new Set(pitches.map((pitch) => pitch % 12))];
+  if (pitchClasses.length < 3) {
+    return "";
+  }
+
+  const bass = Math.min(...pitches) % 12;
+  const candidates = pitchClasses
+    .map((root) => {
+      const intervals = pitchClasses.map((pitchClass) => (pitchClass - root + 12) % 12);
+      const has = (interval: number) => intervals.includes(interval);
+      const triads = [
+        { quality: "", score: has(4) && has(7) ? 3 : 0 },
+        { quality: "m", score: has(3) && has(7) ? 3 : 0 },
+        { quality: "dim", score: has(3) && has(6) ? 3 : 0 },
+        { quality: "aug", score: has(4) && has(8) ? 3 : 0 },
+        { quality: "sus2", score: has(2) && has(7) ? 2 : 0 },
+        { quality: "sus4", score: has(5) && has(7) ? 2 : 0 }
+      ];
+      const bestTriad = triads.sort((a, b) => b.score - a.score)[0];
+      const extension = has(11) ? "maj7" : has(10) ? "7" : "";
+
+      return {
+        root,
+        quality: bestTriad.quality,
+        extension,
+        score: bestTriad.score + (extension ? 1 : 0)
+      };
+    })
+    .filter((candidate) => candidate.score >= 3)
+    .sort((a, b) => b.score - a.score);
+
+  const best = candidates[0];
+  if (!best) {
+    return "";
+  }
+
+  const chordName = `${PITCH_CLASS_NAMES[best.root]}${best.quality}${best.extension}`;
+  return bass !== best.root ? `${chordName}/${PITCH_CLASS_NAMES[bass]}` : chordName;
+}
+
 function isEditableTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) {
     return false;
@@ -757,8 +1049,10 @@ export default function Home() {
   const scoreStageRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const audioInputRef = useRef<HTMLInputElement | null>(null);
+  const midiInputRef = useRef<HTMLInputElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef("");
+  const midiAccessRef = useRef<MidiAccessLike | null>(null);
   const autoScrollFrameRef = useRef<number | null>(null);
   const autoScrollStartTimeRef = useRef(0);
   const [meta, setMeta] = useState<SheetMeta>(DEFAULT_META);
@@ -789,6 +1083,8 @@ export default function Home() {
   const [sectionStartMeasure, setSectionStartMeasure] = useState("1");
   const [sectionRecordingStartMeasure, setSectionRecordingStartMeasure] =
     useState("0");
+  const [midiMeasuresPerRow, setMidiMeasuresPerRow] = useState("4");
+  const [midiStatus, setMidiStatus] = useState("MIDI未読み込み");
   const [pinnedDictionMarks, setPinnedDictionMarks] = useState(
     DEFAULT_PINNED_DICTION_MARKS
   );
@@ -811,6 +1107,7 @@ export default function Home() {
     lyrics: false,
     suno: false,
     audio: false,
+    midi: false,
     scroll: false,
     share: false,
     tools: false,
@@ -907,13 +1204,15 @@ export default function Home() {
       sheetLayoutMode,
       pinnedDictionMarks,
       autoScrollSettings,
-      sunoText
+      sunoText,
+      midiMeasuresPerRow
     }),
     [
       autoScrollSettings,
       items,
       lyricDisplayMode,
       meta,
+      midiMeasuresPerRow,
       pinnedDictionMarks,
       readingLyrics,
       sections,
@@ -1060,6 +1359,7 @@ export default function Home() {
       ...(nextDraft.autoScrollSettings ?? {})
     });
     setSunoText(nextDraft.sunoText ?? "");
+    setMidiMeasuresPerRow(nextDraft.midiMeasuresPerRow ?? "4");
     setIsAutoScrolling(false);
     setAutoScrollElapsed(0);
     setSelectedId("");
@@ -1220,7 +1520,8 @@ export default function Home() {
       sheetLayoutMode: "lyricCard",
       pinnedDictionMarks: DEFAULT_PINNED_DICTION_MARKS,
       autoScrollSettings: DEFAULT_AUTO_SCROLL_SETTINGS,
-      sunoText: ""
+      sunoText: "",
+      midiMeasuresPerRow: "4"
     });
     setStatus("新規作成しました");
   }, [hydrateDraft]);
@@ -1449,6 +1750,171 @@ export default function Home() {
   const addQuickChord = () => {
     const chordIndex = items.filter((item) => item.toolId === "chord").length % 4;
     addItemAt("chord", 14 + chordIndex * 22, SYSTEMS[0].top + 1.2, quickChord);
+  };
+
+  const importParsedMidi = (parsedMidi: ParsedMidi) => {
+    const measuresPerRow = parsePositiveNumber(midiMeasuresPerRow, 4);
+    const beatsPerMeasure = parsedMidi.timeSignature.numerator || 4;
+    const denominator = parsedMidi.timeSignature.denominator || 4;
+    const ticksPerMeasure =
+      parsedMidi.ppq * beatsPerMeasure * (4 / denominator);
+    const noteTool = TOOL_BY_ID.note;
+    const chordTool = TOOL_BY_ID.chord;
+    const nextItems: SheetItem[] = [];
+    const ignoredNotes = { count: 0 };
+
+    parsedMidi.notes.slice(0, 420).forEach((note) => {
+      const measurePosition = note.startTick / ticksPerMeasure;
+      const rowIndex = Math.floor(measurePosition / measuresPerRow);
+      const system = SYSTEMS[rowIndex];
+
+      if (!system) {
+        ignoredNotes.count += 1;
+        return;
+      }
+
+      const positionInRow = measurePosition - rowIndex * measuresPerRow;
+      nextItems.push({
+        id: createId(),
+        toolId: "note",
+        label: midiPitchName(note.pitch),
+        x: clamp(10 + (80 * positionInRow) / measuresPerRow, 8, 92),
+        y: midiPitchToStaffY(note.pitch, rowIndex),
+        size: noteTool.size,
+        color: noteTool.color,
+        pitch: note.pitch,
+        durationTicks: note.endTick - note.startTick
+      });
+    });
+
+    const chordGrid = Math.max(1, Math.round(parsedMidi.ppq / 4));
+    const groupedNotes = new Map<number, ParsedMidiNote[]>();
+    parsedMidi.notes.forEach((note) => {
+      const gridTick = Math.round(note.startTick / chordGrid) * chordGrid;
+      groupedNotes.set(gridTick, [...(groupedNotes.get(gridTick) ?? []), note]);
+    });
+
+    const seenChordSlots = new Set<string>();
+    [...groupedNotes.entries()]
+      .sort(([tickA], [tickB]) => tickA - tickB)
+      .forEach(([gridTick, notesInSlot]) => {
+        const uniquePitches = [...new Set(notesInSlot.map((note) => note.pitch))];
+        const chordName = detectChordName(uniquePitches);
+        if (!chordName) {
+          return;
+        }
+
+        const measurePosition = gridTick / ticksPerMeasure;
+        const rowIndex = Math.floor(measurePosition / measuresPerRow);
+        const system = SYSTEMS[rowIndex];
+        if (!system) {
+          return;
+        }
+
+        const beatInMeasure = Math.floor(
+          ((measurePosition % 1) * beatsPerMeasure) + 0.0001
+        );
+        const chordSlot = `${rowIndex}:${Math.floor(measurePosition)}:${beatInMeasure}`;
+        if (seenChordSlots.has(chordSlot)) {
+          return;
+        }
+        seenChordSlots.add(chordSlot);
+
+        const positionInRow = measurePosition - rowIndex * measuresPerRow;
+        nextItems.push({
+          id: createId(),
+          toolId: "chord",
+          label: chordName,
+          x: clamp(10 + (80 * positionInRow) / measuresPerRow, 8, 92),
+          y: system.top + 1.35,
+          size: chordTool.size,
+          color: chordTool.color
+        });
+      });
+
+    setItems((current) => [...current, ...nextItems]);
+    setSheetLayoutMode("staff");
+    setSelectedId(nextItems.at(-1)?.id ?? "");
+    setMidiStatus(
+      `${parsedMidi.name || "MIDI"}: 音符${nextItems.filter((item) => item.toolId === "note").length} / コード${nextItems.filter((item) => item.toolId === "chord").length}${
+        ignoredNotes.count ? ` / 範囲外${ignoredNotes.count}` : ""
+      }`
+    );
+    setStatus("MIDIを5線譜へ配置しました");
+  };
+
+  const importMidiFile = async (file: File) => {
+    try {
+      const parsedMidi = parseMidiFile(await file.arrayBuffer());
+      importParsedMidi(parsedMidi);
+    } catch (error) {
+      setMidiStatus(error instanceof Error ? error.message : "MIDIを読めませんでした");
+      setStatus("MIDIを読めませんでした");
+    }
+  };
+
+  const addLiveMidiNote = useCallback((pitch: number) => {
+    const noteTool = TOOL_BY_ID.note;
+
+    setItems((current) => {
+      const noteCount = current.filter((item) => item.toolId === "note").length;
+      const rowIndex = Math.floor(noteCount / 16) % SYSTEMS.length;
+      const positionInRow = noteCount % 16;
+      const noteItem: SheetItem = {
+        id: createId(),
+        toolId: "note",
+        label: midiPitchName(pitch),
+        x: 10 + positionInRow * 5.2,
+        y: midiPitchToStaffY(pitch, rowIndex),
+        size: noteTool.size,
+        color: noteTool.color,
+        pitch
+      };
+
+      setSelectedId(noteItem.id);
+      setSheetLayoutMode("staff");
+      setMidiStatus(`Web MIDI: ${midiPitchName(pitch)} を受信`);
+      return [...current, noteItem];
+    });
+  }, []);
+
+  const connectMidiDevices = async () => {
+    const requestMIDIAccess = (
+      navigator as Navigator & {
+        requestMIDIAccess?: () => Promise<MidiAccessLike>;
+      }
+    ).requestMIDIAccess;
+
+    if (!requestMIDIAccess) {
+      setMidiStatus("このブラウザはWeb MIDIに未対応です");
+      return;
+    }
+
+    try {
+      const access = await requestMIDIAccess();
+      midiAccessRef.current = access;
+      const inputs = Array.from(access.inputs.values());
+
+      inputs.forEach((input) => {
+        input.onmidimessage = (event) => {
+          const [statusByte = 0, pitch = 0, velocity = 0] = Array.from(
+            event.data ?? []
+          );
+          const eventType = statusByte & 0xf0;
+          if (eventType === 0x90 && velocity > 0) {
+            addLiveMidiNote(pitch);
+          }
+        };
+      });
+
+      setMidiStatus(
+        inputs.length
+          ? `${inputs.length}個のMIDI入力に接続しました`
+          : "MIDI入力が見つかりません"
+      );
+    } catch {
+      setMidiStatus("MIDI機器に接続できませんでした");
+    }
   };
 
   const handleAudioUpload = async (file: File) => {
@@ -1978,6 +2444,70 @@ export default function Home() {
                   onChange={(event) => setSunoText(event.target.value)}
                   rows={8}
                 />
+              </>
+            )}
+          </section>
+
+          <section className="panel-section midi-panel">
+            <button
+              type="button"
+              className="section-heading section-toggle"
+              onClick={() => togglePanel("midi")}
+              aria-expanded={!collapsedPanels.midi}
+            >
+              <Music2 size={18} />
+              <span>MIDI / DAW</span>
+              <ChevronDown
+                className={`section-chevron ${
+                  collapsedPanels.midi ? "collapsed" : ""
+                }`}
+                size={18}
+              />
+            </button>
+            {!collapsedPanels.midi && (
+              <>
+                <input
+                  ref={midiInputRef}
+                  className="sr-only"
+                  type="file"
+                  accept=".mid,.midi,audio/midi,audio/x-midi"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) {
+                      void importMidiFile(file);
+                    }
+                    event.currentTarget.value = "";
+                  }}
+                />
+                <label className="field-label" htmlFor="midiMeasuresPerRow">
+                  MIDI 1段小節
+                </label>
+                <input
+                  id="midiMeasuresPerRow"
+                  type="number"
+                  min={1}
+                  value={midiMeasuresPerRow}
+                  onChange={(event) => setMidiMeasuresPerRow(event.target.value)}
+                />
+                <div className="button-row">
+                  <button
+                    type="button"
+                    className="control-button"
+                    onClick={() => midiInputRef.current?.click()}
+                  >
+                    <Upload size={16} />
+                    <span>MIDI読込</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="control-button"
+                    onClick={() => void connectMidiDevices()}
+                  >
+                    <Keyboard size={16} />
+                    <span>機器接続</span>
+                  </button>
+                </div>
+                <p className="midi-status">{midiStatus}</p>
               </>
             )}
           </section>

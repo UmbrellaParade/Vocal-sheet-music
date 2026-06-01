@@ -320,6 +320,15 @@ button:focus-visible {
   white-space: nowrap;
 }
 
+.midi-status {
+  min-height: 20px;
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
 .audio-controls {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -1069,6 +1078,53 @@ kbd {
     0 0 3px rgba(255, 255, 255, 0.95),
     0 1px 0 rgba(255, 247, 237, 0.92);
   box-shadow: none;
+}
+
+.sheet-note {
+  width: 24px;
+  min-width: 24px;
+  min-height: 32px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  overflow: visible;
+  box-shadow: none;
+}
+
+.sheet-note .item-content {
+  opacity: 0;
+}
+
+.sheet-note::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  bottom: 5px;
+  width: 15px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--item-color);
+  transform: rotate(-18deg);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+.sheet-note::after {
+  content: "";
+  position: absolute;
+  left: 15px;
+  bottom: 9px;
+  width: 2px;
+  height: 25px;
+  border-radius: 999px;
+  background: var(--item-color);
+}
+
+.sheet-note.selected {
+  border-color: transparent;
+  box-shadow: none;
+  filter:
+    drop-shadow(0 0 3px rgba(250, 204, 21, 0.8))
+    drop-shadow(0 0 8px rgba(250, 204, 21, 0.42));
 }
 
 .sheet-symbol.tool-vibrato {
