@@ -408,18 +408,18 @@ button:focus-visible {
 .tool-button:hover {
   border-color: var(--tool-color);
   background:
-    radial-gradient(circle at 25% 18%, color-mix(in srgb, var(--tool-color), transparent 62%), transparent 46%),
+    radial-gradient(circle at 25% 18%, color-mix(in srgb, var(--tool-color), transparent 74%), transparent 46%),
     linear-gradient(180deg, #263449, #111827);
 }
 
 .tool-button.active {
   border-color: var(--tool-color);
   background:
-    radial-gradient(circle at 24% 20%, color-mix(in srgb, var(--tool-color), transparent 55%), transparent 46%),
+    radial-gradient(circle at 24% 20%, color-mix(in srgb, var(--tool-color), transparent 70%), transparent 46%),
     linear-gradient(180deg, #253247, #111827);
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--tool-color), transparent 42%),
-    0 0 22px color-mix(in srgb, var(--tool-color), transparent 50%),
+    0 0 14px color-mix(in srgb, var(--tool-color), transparent 70%),
     inset 0 1px 0 rgba(255, 255, 255, 0.18);
 }
 
@@ -433,23 +433,23 @@ button:focus-visible {
   height: 34px;
   border-radius: 6px;
   color: var(--tool-color);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.04)),
-    color-mix(in srgb, var(--tool-color), #0f172a 76%);
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--tool-color), white 18%),
-    0 0 14px color-mix(in srgb, var(--tool-color), transparent 56%);
+  background: transparent;
+  box-shadow: none;
   font-size: 22px;
   font-weight: 800;
   line-height: 1;
   white-space: nowrap;
   text-shadow:
-    0 0 8px color-mix(in srgb, var(--tool-color), transparent 22%),
+    0 0 5px color-mix(in srgb, var(--tool-color), transparent 55%),
     0 1px 0 #020617;
 }
 
 .tool-button.tool-diction .tool-symbol {
   font-size: 16px;
+}
+
+.tool-button.tool-lyric .tool-symbol {
+  color: #f8fafc;
 }
 
 .symbol-art {
@@ -461,8 +461,8 @@ button:focus-visible {
   color: currentColor;
   line-height: 1;
   filter:
-    drop-shadow(0 0 0.16em rgba(255, 255, 255, 0.9))
-    drop-shadow(0 0 0.28em currentColor);
+    drop-shadow(0 0 0.12em rgba(255, 255, 255, 0.82))
+    drop-shadow(0 0 0.16em color-mix(in srgb, currentColor, transparent 55%));
 }
 
 .symbol-art > span,
@@ -557,6 +557,46 @@ button:focus-visible {
   font-size: 1.24em;
   font-weight: 900;
   transform: translate(-50%, -50%) scaleX(1.12);
+}
+
+.symbol-crescendo,
+.symbol-decrescendo {
+  width: 2.5em;
+  height: 1.1em;
+}
+
+.symbol-crescendo::before,
+.symbol-crescendo::after,
+.symbol-decrescendo::before,
+.symbol-decrescendo::after {
+  left: 10%;
+  top: 50%;
+  width: 82%;
+  height: 0.12em;
+  border-radius: 999px;
+  background: currentColor;
+  transform-origin: left center;
+}
+
+.symbol-crescendo::before {
+  transform: rotate(-15deg);
+}
+
+.symbol-crescendo::after {
+  transform: rotate(15deg);
+}
+
+.symbol-decrescendo::before,
+.symbol-decrescendo::after {
+  transform-origin: right center;
+}
+
+.symbol-decrescendo::before {
+  transform: rotate(15deg);
+}
+
+.symbol-decrescendo::after {
+  transform: rotate(-15deg);
 }
 
 .tool-name {
@@ -751,6 +791,32 @@ kbd {
     );
 }
 
+.section-cell {
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+  min-width: 0;
+  line-height: 1.1;
+}
+
+.section-cell strong,
+.section-cell small {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.section-cell strong {
+  font-size: 10px;
+}
+
+.section-cell small {
+  color: #64748b;
+  font-size: 8.5px;
+  font-weight: 800;
+}
+
 .lyric-writing-lane {
   position: absolute;
   left: 86px;
@@ -820,6 +886,11 @@ kbd {
   touch-action: none;
 }
 
+.item-content {
+  position: relative;
+  z-index: 1;
+}
+
 .sheet-item:active {
   cursor: grabbing;
 }
@@ -837,7 +908,7 @@ kbd {
   overflow: visible;
   text-shadow:
     0 0 4px rgba(255, 255, 255, 0.75),
-    0 0 10px color-mix(in srgb, var(--item-color), transparent 18%),
+    0 0 6px color-mix(in srgb, var(--item-color), transparent 55%),
     0 1px 1px rgba(2, 6, 23, 0.6);
 }
 
@@ -847,14 +918,36 @@ kbd {
 }
 
 .sheet-text {
-  border-color: color-mix(in srgb, var(--item-color), white 35%);
+  border-color: transparent;
   color: var(--item-color);
-  background:
-    linear-gradient(180deg, rgba(15, 23, 42, 0.86), rgba(15, 23, 42, 0.72));
+  background: transparent;
   font-weight: 700;
   text-shadow:
-    0 1px 0 #020617,
-    0 0 8px color-mix(in srgb, var(--item-color), transparent 44%);
+    0 1px 0 rgba(255, 255, 255, 0.92),
+    0 0 3px rgba(255, 255, 255, 0.75);
+}
+
+.sheet-text.has-highlight {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--highlight-color);
+  box-shadow: inset 0 -2px 0 rgba(15, 23, 42, 0.08);
+}
+
+.comment-badge {
+  position: absolute;
+  right: -8px;
+  top: -8px;
+  z-index: 2;
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #bae6fd;
+  border-radius: 50%;
+  color: #075985;
+  background: #e0f2fe;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.16);
 }
 
 .sheet-chord {
@@ -902,19 +995,17 @@ kbd {
 }
 
 .sheet-text.tool-lyric {
-  color: #f8fafc;
-  -webkit-text-stroke: 0.35px #020617;
+  color: #1f2937;
+  -webkit-text-stroke: 0;
 }
 
 .sheet-text.tool-vowel {
-  border-radius: 999px;
-  color: #67e8f9;
+  color: #0891b2;
 }
 
 .sheet-text.tool-dynamic,
 .sheet-text.tool-marker {
   color: var(--item-color);
-  border-style: solid;
 }
 
 .sheet-item.selected {
@@ -959,47 +1050,91 @@ kbd {
 
 .section-editor {
   display: grid;
-  grid-template-columns: 82px minmax(0, 1fr) 40px;
+  grid-template-columns: 1fr 1fr 1.25fr;
   gap: 8px;
   margin-bottom: 8px;
 }
 
-.section-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+.measure-editor {
+  display: grid;
+  grid-template-columns: 1fr 1fr 40px;
+  gap: 8px;
   margin-top: 10px;
 }
 
-.section-chips button {
+.recording-order-list {
+  display: grid;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.recording-section {
   --section-color: #0891b2;
-  min-height: 30px;
-  display: inline-flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 6px;
-  padding: 0 9px;
+  gap: 8px;
+  padding: 7px;
   border: 1px solid color-mix(in srgb, var(--section-color), white 54%);
   border-radius: 6px;
-  color: color-mix(in srgb, var(--section-color), #0f172a 22%);
   background: color-mix(in srgb, var(--section-color), white 88%);
+}
+
+.section-edit-button {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  color: color-mix(in srgb, var(--section-color), #0f172a 22%);
+  background: transparent;
+  text-align: left;
   cursor: pointer;
+}
+
+.section-edit-button strong,
+.section-edit-button small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.section-edit-button strong {
   font-size: 12px;
   font-weight: 800;
 }
 
-.section-chips button span {
-  width: 18px;
-  height: 18px;
+.section-edit-button small {
+  color: #475569;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.section-order-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.section-order-actions button {
+  width: 26px;
+  height: 26px;
   display: grid;
   place-items: center;
-  border-radius: 50%;
-  color: #fff;
-  background: var(--section-color);
-  font-size: 10px;
+  border: 1px solid color-mix(in srgb, var(--section-color), white 42%);
+  border-radius: 5px;
+  color: var(--section-color);
+  background: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+}
+
+.section-order-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
 }
 
 .chord-presets button,
-.diction-presets button {
+.diction-mark-button {
   min-height: 30px;
   padding: 0 9px;
   border: 1px solid #fed7aa;
@@ -1012,12 +1147,25 @@ kbd {
 }
 
 .chord-presets button:hover,
-.diction-presets button:hover {
+.diction-mark-button:hover {
   border-color: #f59e0b;
   background: #ffedd5;
 }
 
-.diction-presets button {
+.preset-label {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.diction-option {
+  display: grid;
+  grid-template-columns: minmax(46px, auto) 24px;
+  gap: 3px;
+}
+
+.diction-mark-button {
   min-width: 46px;
   display: grid;
   gap: 1px;
@@ -1025,21 +1173,62 @@ kbd {
   color: #9a3412;
 }
 
-.diction-presets button span {
+.diction-mark-button span {
   line-height: 1;
 }
 
-.diction-presets button small {
+.diction-mark-button small {
   color: #9a6a4a;
   font-size: 10px;
   font-weight: 700;
   line-height: 1;
 }
 
-.diction-presets button.active {
+.diction-mark-button.active {
   border-color: #f97316;
   background: #fed7aa;
   box-shadow: inset 0 0 0 1px rgba(249, 115, 22, 0.22);
+}
+
+.pin-button {
+  width: 24px;
+  min-height: 30px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  color: #94a3b8;
+  background: #fff;
+  cursor: pointer;
+}
+
+.pin-button.pinned {
+  color: #0f766e;
+  border-color: #99f6e4;
+  background: #f0fdfa;
+}
+
+.marker-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.marker-swatches button {
+  min-width: 30px;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.marker-swatches .clear-marker {
+  width: auto;
+  padding: 0 8px;
+  color: var(--muted);
+  background: #fff;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .swatches {

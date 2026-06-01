@@ -1,19 +1,25 @@
 "use client";
 
 import {
+  ArrowDown,
+  ArrowUp,
   ChevronDown,
+  Copy,
   Download,
   Eraser,
   FileJson,
   FolderOpen,
   Keyboard,
+  MessageSquare,
   Music2,
   Pause,
+  Pin,
   Play,
   Plus,
   Printer,
   RotateCcw,
   Save,
+  Share2,
   SlidersHorizontal,
   SkipBack,
   SkipForward,
@@ -49,6 +55,8 @@ type ToolId =
   | "accent"
   | "diction"
   | "hold"
+  | "crescendo"
+  | "decrescendo"
   | "dynamic"
   | "marker";
 
@@ -72,6 +80,8 @@ type SheetItem = {
   y: number;
   size: number;
   color: string;
+  highlightColor?: string;
+  comment?: string;
 };
 
 type SheetMeta = {
@@ -91,12 +101,18 @@ type DraftData = {
   sections?: SectionEntry[];
   showChords?: boolean;
   lyricDisplayMode?: LyricDisplayMode;
+  pinnedDictionMarks?: string[];
 };
 
 type SectionEntry = {
   id: string;
   name: string;
   rowIndex: number;
+  startRow?: number;
+  endRow?: number;
+  order?: number;
+  startMeasure?: string;
+  recordingStartMeasure?: string;
   color: string;
 };
 
@@ -105,6 +121,7 @@ type LyricDisplayMode = "original" | "reading" | "vowel";
 type PanelId =
   | "lyrics"
   | "audio"
+  | "share"
   | "tools"
   | "settings"
   | "inspector"
@@ -123,10 +140,10 @@ const DEFAULT_META: SheetMeta = {
 const SHEET_TOOLS: ToolSpec[] = [
   {
     id: "lyric",
-    name: "歌詞",
+    name: "歌詞テキスト",
     label: "la",
     shortcut: "L",
-    color: "#f8fafc",
+    color: "#1f2937",
     size: 18,
     kind: "text"
   },
@@ -153,7 +170,7 @@ const SHEET_TOOLS: ToolSpec[] = [
     name: "ビブラート",
     label: "W",
     shortcut: "V",
-    color: "#39ff55",
+    color: "#22a85a",
     size: 30,
     kind: "symbol"
   },
@@ -171,7 +188,7 @@ const SHEET_TOOLS: ToolSpec[] = [
     name: "しゃくり",
     label: "↗",
     shortcut: "S",
-    color: "#ff2d2d",
+    color: "#dc2626",
     size: 28,
     kind: "symbol"
   },
@@ -180,7 +197,7 @@ const SHEET_TOOLS: ToolSpec[] = [
     name: "フォール",
     label: "↘",
     shortcut: "F",
-    color: "#d946ef",
+    color: "#9333ea",
     size: 28,
     kind: "symbol"
   },
@@ -189,7 +206,7 @@ const SHEET_TOOLS: ToolSpec[] = [
     name: "こぶし",
     label: "○",
     shortcut: "U",
-    color: "#22d3ee",
+    color: "#0891b2",
     size: 30,
     kind: "symbol"
   },
@@ -221,6 +238,24 @@ const SHEET_TOOLS: ToolSpec[] = [
     kind: "symbol"
   },
   {
+    id: "crescendo",
+    name: "クレッシェンド",
+    label: "<",
+    shortcut: "Q",
+    color: "#334155",
+    size: 34,
+    kind: "symbol"
+  },
+  {
+    id: "decrescendo",
+    name: "デクレッシェンド",
+    label: ">",
+    shortcut: "E",
+    color: "#334155",
+    size: 34,
+    kind: "symbol"
+  },
+  {
     id: "dynamic",
     name: "強弱",
     label: "mf",
@@ -231,7 +266,7 @@ const SHEET_TOOLS: ToolSpec[] = [
   },
   {
     id: "marker",
-    name: "区切り",
+    name: "メモ印",
     label: "A",
     shortcut: "M",
     color: "#fb923c",
@@ -251,10 +286,10 @@ const SYSTEMS = [
 ];
 
 const COLOR_SWATCHES = [
-  "#00d4ff",
-  "#39ff55",
-  "#22d3ee",
-  "#ff2d2d",
+  "#0ea5e9",
+  "#22a85a",
+  "#0891b2",
+  "#dc2626",
   "#facc15",
   "#fb7185",
   "#4ade80",
@@ -263,6 +298,15 @@ const COLOR_SWATCHES = [
   "#fb923c",
   "#f97316",
   "#f8fafc"
+];
+
+const HIGHLIGHT_SWATCHES = [
+  "#fef08a",
+  "#fed7aa",
+  "#bbf7d0",
+  "#bfdbfe",
+  "#fbcfe8",
+  "#e9d5ff"
 ];
 
 const COMMON_CHORDS = ["C", "Dm7", "Em7", "F", "G7", "Am7", "Bm7-5"];
@@ -289,11 +333,39 @@ const SECTION_COLORS = [
 ];
 
 const DEFAULT_SECTIONS: SectionEntry[] = [
-  { id: "section-a1", name: "Aメロ1", rowIndex: 0, color: SECTION_COLORS[0] },
-  { id: "section-a2", name: "Aメロ2", rowIndex: 1, color: SECTION_COLORS[1] },
-  { id: "section-b", name: "Bメロ", rowIndex: 2, color: SECTION_COLORS[2] },
-  { id: "section-chorus", name: "サビ", rowIndex: 3, color: SECTION_COLORS[3] },
-  { id: "section-c", name: "Cメロ", rowIndex: 4, color: SECTION_COLORS[4] }
+  {
+    id: "section-a1",
+    name: "Aメロ1",
+    rowIndex: 0,
+    startRow: 0,
+    endRow: 1,
+    order: 0,
+    startMeasure: "1",
+    recordingStartMeasure: "0",
+    color: SECTION_COLORS[0]
+  },
+  {
+    id: "section-b",
+    name: "Bメロ",
+    rowIndex: 2,
+    startRow: 2,
+    endRow: 2,
+    order: 1,
+    startMeasure: "17",
+    recordingStartMeasure: "16",
+    color: SECTION_COLORS[2]
+  },
+  {
+    id: "section-chorus",
+    name: "サビ",
+    rowIndex: 3,
+    startRow: 3,
+    endRow: 4,
+    order: 2,
+    startMeasure: "25",
+    recordingStartMeasure: "24",
+    color: SECTION_COLORS[3]
+  }
 ];
 
 const ART_SYMBOL_TOOL_IDS: ToolId[] = [
@@ -301,8 +373,12 @@ const ART_SYMBOL_TOOL_IDS: ToolId[] = [
   "fall",
   "vibrato",
   "kobushi",
-  "breath"
+  "breath",
+  "crescendo",
+  "decrescendo"
 ];
+
+const DEFAULT_PINNED_DICTION_MARKS = ["K", "T", "S", "L", "th", "f", "v", "m"];
 
 const AUDIO_DB_NAME = "vocal-sheet-music-audio";
 const AUDIO_STORE_NAME = "audio";
@@ -312,13 +388,25 @@ const DICTION_MARKS = [
   { value: "T", note: "タ行" },
   { value: "S", note: "サ行" },
   { value: "K", note: "カ行" },
+  { value: "G", note: "ガ行" },
+  { value: "P", note: "パ行" },
+  { value: "B", note: "バ行" },
+  { value: "D", note: "ダ行" },
   { value: "R", note: "ラ行" },
   { value: "L", note: "L" },
   { value: "N", note: "ナ行" },
+  { value: "H", note: "ハ行" },
+  { value: "Y", note: "ヤ行" },
+  { value: "W", note: "ワ行" },
   { value: "th", note: "TH" },
+  { value: "sh", note: "SH" },
+  { value: "ch", note: "CH" },
+  { value: "j", note: "J" },
+  { value: "z", note: "Z" },
   { value: "f", note: "F" },
   { value: "v", note: "V" },
-  { value: "m", note: "M" }
+  { value: "m", note: "M" },
+  { value: "ng", note: "NG" }
 ];
 
 const TOOL_BY_ID = SHEET_TOOLS.reduce(
@@ -344,6 +432,53 @@ function formatTime(seconds: number) {
     .toString()
     .padStart(2, "0");
   return `${minutes}:${remainingSeconds}`;
+}
+
+function getSectionStartRow(section: SectionEntry) {
+  return clamp(section.startRow ?? section.rowIndex ?? 0, 0, SYSTEMS.length - 1);
+}
+
+function getSectionEndRow(section: SectionEntry) {
+  return clamp(
+    section.endRow ?? section.startRow ?? section.rowIndex ?? 0,
+    0,
+    SYSTEMS.length - 1
+  );
+}
+
+function normalizeSections(sections: SectionEntry[] | undefined) {
+  return (sections ?? DEFAULT_SECTIONS)
+    .map((section, index) => {
+      const startRow = Math.min(getSectionStartRow(section), getSectionEndRow(section));
+      const endRow = Math.max(getSectionStartRow(section), getSectionEndRow(section));
+
+      return {
+        ...section,
+        rowIndex: startRow,
+        startRow,
+        endRow,
+        order: section.order ?? index,
+        startMeasure: section.startMeasure ?? "",
+        recordingStartMeasure: section.recordingStartMeasure ?? "",
+        color: section.color ?? SECTION_COLORS[index % SECTION_COLORS.length]
+      };
+    })
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+}
+
+function encodeShareData(draft: DraftData) {
+  const bytes = new TextEncoder().encode(JSON.stringify(draft));
+  let binary = "";
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return btoa(binary);
+}
+
+function decodeShareData(payload: string) {
+  const binary = atob(payload.trim());
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  return JSON.parse(new TextDecoder().decode(bytes)) as Partial<DraftData>;
 }
 
 function isEditableTarget(target: EventTarget | null) {
@@ -492,8 +627,16 @@ export default function Home() {
   const [lyricDisplayMode, setLyricDisplayMode] =
     useState<LyricDisplayMode>("original");
   const [sections, setSections] = useState<SectionEntry[]>(DEFAULT_SECTIONS);
-  const [sectionRow, setSectionRow] = useState(0);
+  const [sectionStartRow, setSectionStartRow] = useState(0);
+  const [sectionEndRow, setSectionEndRow] = useState(1);
   const [sectionName, setSectionName] = useState(SECTION_PRESETS[0]);
+  const [sectionStartMeasure, setSectionStartMeasure] = useState("1");
+  const [sectionRecordingStartMeasure, setSectionRecordingStartMeasure] =
+    useState("0");
+  const [pinnedDictionMarks, setPinnedDictionMarks] = useState(
+    DEFAULT_PINNED_DICTION_MARKS
+  );
+  const [sharePayload, setSharePayload] = useState("");
   const [audioName, setAudioName] = useState("");
   const [audioUrl, setAudioUrl] = useState("");
   const [audioDuration, setAudioDuration] = useState(0);
@@ -506,6 +649,7 @@ export default function Home() {
   >({
     lyrics: false,
     audio: false,
+    share: false,
     tools: false,
     settings: false,
     inspector: false,
@@ -517,9 +661,41 @@ export default function Home() {
     [items, selectedId]
   );
 
+  const normalizedSections = useMemo(() => normalizeSections(sections), [sections]);
+
   const sectionByRow = useMemo(() => {
-    return new Map(sections.map((section) => [section.rowIndex, section]));
+    const rowMap = new Map<
+      number,
+      { section: SectionEntry; rowPart: number; rowTotal: number }
+    >();
+
+    normalizeSections(sections)
+      .slice()
+      .sort((a, b) => getSectionStartRow(a) - getSectionStartRow(b))
+      .forEach((section) => {
+        const startRow = getSectionStartRow(section);
+        const endRow = getSectionEndRow(section);
+        const rowTotal = endRow - startRow + 1;
+
+        for (let rowIndex = startRow; rowIndex <= endRow; rowIndex += 1) {
+          rowMap.set(rowIndex, {
+            section,
+            rowPart: rowIndex - startRow + 1,
+            rowTotal
+          });
+        }
+      });
+
+    return rowMap;
   }, [sections]);
+
+  const pinnedDictionOptions = useMemo(
+    () =>
+      pinnedDictionMarks
+        .map((value) => DICTION_MARKS.find((mark) => mark.value === value))
+        .filter((mark): mark is (typeof DICTION_MARKS)[number] => Boolean(mark)),
+    [pinnedDictionMarks]
+  );
 
   const togglePanel = useCallback((panelId: PanelId) => {
     setCollapsedPanels((current) => ({
@@ -537,12 +713,14 @@ export default function Home() {
       vowelLyrics,
       sections,
       showChords,
-      lyricDisplayMode
+      lyricDisplayMode,
+      pinnedDictionMarks
     }),
     [
       items,
       lyricDisplayMode,
       meta,
+      pinnedDictionMarks,
       readingLyrics,
       sections,
       showChords,
@@ -630,11 +808,14 @@ export default function Home() {
     setSourceLyrics(nextDraft.sourceLyrics ?? "");
     setReadingLyrics(nextDraft.readingLyrics ?? "");
     setVowelLyrics(nextDraft.vowelLyrics ?? "");
-    setSections(
-      Array.isArray(nextDraft.sections) ? nextDraft.sections : DEFAULT_SECTIONS
-    );
+    setSections(normalizeSections(nextDraft.sections));
     setShowChords(nextDraft.showChords ?? true);
     setLyricDisplayMode(nextDraft.lyricDisplayMode ?? "original");
+    setPinnedDictionMarks(
+      Array.isArray(nextDraft.pinnedDictionMarks)
+        ? nextDraft.pinnedDictionMarks
+        : DEFAULT_PINNED_DICTION_MARKS
+    );
     setSelectedId("");
   }, []);
 
@@ -789,7 +970,8 @@ export default function Home() {
       vowelLyrics: "",
       sections: DEFAULT_SECTIONS,
       showChords: true,
-      lyricDisplayMode: "original"
+      lyricDisplayMode: "original",
+      pinnedDictionMarks: DEFAULT_PINNED_DICTION_MARKS
     });
     setStatus("新規作成しました");
   }, [hydrateDraft]);
@@ -803,6 +985,20 @@ export default function Home() {
       } catch {
         setStatus("準備OK");
       }
+    }
+  }, [hydrateDraft]);
+
+  useEffect(() => {
+    if (!window.location.hash.startsWith("#share=")) {
+      return;
+    }
+
+    try {
+      hydrateDraft(decodeShareData(decodeURIComponent(window.location.hash.slice(7))));
+      setStatus("共有データを読み込みました");
+      window.history.replaceState(null, "", window.location.pathname);
+    } catch {
+      setStatus("共有データを読み込めませんでした");
     }
   }, [hydrateDraft]);
 
@@ -1039,27 +1235,117 @@ export default function Home() {
     }
 
     setSections((current) => {
-      const color = SECTION_COLORS[sectionRow % SECTION_COLORS.length];
+      const normalizedCurrent = normalizeSections(current);
+      const startRow = Math.min(sectionStartRow, sectionEndRow);
+      const endRow = Math.max(sectionStartRow, sectionEndRow);
+      const existing = normalizedCurrent.find(
+        (section) => getSectionStartRow(section) === startRow
+      );
+      const color =
+        existing?.color ??
+        SECTION_COLORS[normalizedCurrent.length % SECTION_COLORS.length];
       const nextSection: SectionEntry = {
-        id: `section-${sectionRow}-${trimmedName}`,
+        id: existing?.id ?? createId(),
         name: trimmedName,
-        rowIndex: sectionRow,
+        rowIndex: startRow,
+        startRow,
+        endRow,
+        order: existing?.order ?? normalizedCurrent.length,
+        startMeasure: sectionStartMeasure.trim(),
+        recordingStartMeasure: sectionRecordingStartMeasure.trim(),
         color
       };
 
-      return [
-        ...current.filter((section) => section.rowIndex !== sectionRow),
+      return normalizeSections([
+        ...normalizedCurrent.filter(
+          (section) => getSectionStartRow(section) !== startRow
+        ),
         nextSection
-      ].sort((a, b) => a.rowIndex - b.rowIndex);
+      ]);
     });
     setStatus(`${trimmedName}を設定`);
   };
 
-  const removeSection = (rowIndex: number) => {
+  const removeSection = (sectionId: string) => {
     setSections((current) =>
-      current.filter((section) => section.rowIndex !== rowIndex)
+      normalizeSections(current)
+        .filter((section) => section.id !== sectionId)
+        .map((section, index) => ({ ...section, order: index }))
     );
     setStatus("セクションを外しました");
+  };
+
+  const moveSection = (sectionId: string, direction: -1 | 1) => {
+    setSections((current) => {
+      const ordered = normalizeSections(current);
+      const currentIndex = ordered.findIndex((section) => section.id === sectionId);
+      const nextIndex = currentIndex + direction;
+
+      if (currentIndex < 0 || nextIndex < 0 || nextIndex >= ordered.length) {
+        return ordered;
+      }
+
+      const next = [...ordered];
+      [next[currentIndex], next[nextIndex]] = [next[nextIndex], next[currentIndex]];
+      return next.map((section, index) => ({ ...section, order: index }));
+    });
+    setStatus("録音順を更新しました");
+  };
+
+  const fillSectionForm = (section: SectionEntry) => {
+    setSectionName(section.name);
+    setSectionStartRow(getSectionStartRow(section));
+    setSectionEndRow(getSectionEndRow(section));
+    setSectionStartMeasure(section.startMeasure ?? "");
+    setSectionRecordingStartMeasure(section.recordingStartMeasure ?? "");
+  };
+
+  const toggleDictionPin = (value: string) => {
+    setPinnedDictionMarks((current) =>
+      current.includes(value)
+        ? current.filter((mark) => mark !== value)
+        : [...current, value]
+    );
+  };
+
+  const createSharePayload = async () => {
+    try {
+      const payload = encodeShareData(draft);
+      setSharePayload(payload);
+      await navigator.clipboard?.writeText(payload);
+      setStatus("共有コードをコピーしました");
+    } catch {
+      setStatus("共有コードを作れませんでした");
+    }
+  };
+
+  const createShareUrl = async () => {
+    try {
+      const payload = encodeShareData(draft);
+      const url = `${window.location.origin}${window.location.pathname}#share=${encodeURIComponent(
+        payload
+      )}`;
+      setSharePayload(payload);
+
+      if (navigator.share) {
+        await navigator.share({ title: meta.title, text: url, url });
+      } else {
+        await navigator.clipboard?.writeText(url);
+      }
+
+      setStatus("共有リンクを用意しました");
+    } catch {
+      setStatus("共有リンクを作れませんでした");
+    }
+  };
+
+  const importSharePayload = () => {
+    try {
+      hydrateDraft(decodeShareData(sharePayload));
+      setStatus("共有コードを読み込みました");
+    } catch {
+      setStatus("共有コードを読み込めませんでした");
+    }
   };
 
   const updateMeta = (key: keyof SheetMeta, value: string) => {
@@ -1313,6 +1599,63 @@ export default function Home() {
               </>
             )}
           </section>
+
+          <section className="panel-section share-panel">
+            <button
+              type="button"
+              className="section-heading section-toggle"
+              onClick={() => togglePanel("share")}
+              aria-expanded={!collapsedPanels.share}
+            >
+              <Share2 size={18} />
+              <span>共有</span>
+              <ChevronDown
+                className={`section-chevron ${
+                  collapsedPanels.share ? "collapsed" : ""
+                }`}
+                size={18}
+              />
+            </button>
+            {!collapsedPanels.share && (
+              <>
+                <div className="button-row">
+                  <button
+                    type="button"
+                    className="control-button"
+                    onClick={() => void createSharePayload()}
+                  >
+                    <Copy size={16} />
+                    <span>コード</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="control-button"
+                    onClick={() => void createShareUrl()}
+                  >
+                    <Share2 size={16} />
+                    <span>リンク</span>
+                  </button>
+                </div>
+                <label className="field-label" htmlFor="sharePayload">
+                  共有コード
+                </label>
+                <textarea
+                  id="sharePayload"
+                  value={sharePayload}
+                  onChange={(event) => setSharePayload(event.target.value)}
+                  rows={4}
+                />
+                <button
+                  type="button"
+                  className="wide-button neutral"
+                  onClick={importSharePayload}
+                >
+                  <FolderOpen size={16} />
+                  <span>共有コードを読み込み</span>
+                </button>
+              </>
+            )}
+          </section>
         </aside>
 
         <section className="score-column">
@@ -1383,30 +1726,57 @@ export default function Home() {
               </div>
 
               {SYSTEMS.map((system, systemIndex) => (
-                <div
-                  key={systemIndex}
-                  className="system"
-                  style={{
-                    top: `${system.top}%`,
-                    height: `${system.height}%`
-                  }}
-                >
-                  <div className="phrase-row-header">
-                    <span
-                      style={
-                        {
-                          "--section-color":
-                            sectionByRow.get(systemIndex)?.color ?? "#0891b2"
-                        } as CSSProperties
-                      }
+                (() => {
+                  const sectionSlot = sectionByRow.get(systemIndex);
+                  const sectionLabel = sectionSlot
+                    ? `${sectionSlot.section.name}${
+                        sectionSlot.rowTotal > 1
+                          ? ` ${sectionSlot.rowPart}/${sectionSlot.rowTotal}`
+                          : ""
+                      }`
+                    : `${systemIndex + 1}`;
+                  const measureLabel = sectionSlot
+                    ? [
+                        sectionSlot.section.startMeasure
+                          ? `${sectionSlot.section.startMeasure}小節`
+                          : "",
+                        sectionSlot.section.recordingStartMeasure
+                          ? `録${sectionSlot.section.recordingStartMeasure}`
+                          : ""
+                      ]
+                        .filter(Boolean)
+                        .join(" / ")
+                    : "";
+
+                  return (
+                    <div
+                      key={systemIndex}
+                      className="system"
+                      style={{
+                        top: `${system.top}%`,
+                        height: `${system.height}%`
+                      }}
                     >
-                      {sectionByRow.get(systemIndex)?.name ?? systemIndex + 1}
-                    </span>
-                    <span>コード</span>
-                  </div>
-                  <div className="note-writing-lane" aria-hidden="true" />
-                  <div className="lyric-writing-lane" aria-hidden="true" />
-                </div>
+                      <div className="phrase-row-header">
+                        <span
+                          className="section-cell"
+                          style={
+                            {
+                              "--section-color":
+                                sectionSlot?.section.color ?? "#0891b2"
+                            } as CSSProperties
+                          }
+                        >
+                          <strong>{sectionLabel}</strong>
+                          {measureLabel && <small>{measureLabel}</small>}
+                        </span>
+                        <span>コード</span>
+                      </div>
+                      <div className="note-writing-lane" aria-hidden="true" />
+                      <div className="lyric-writing-lane" aria-hidden="true" />
+                    </div>
+                  );
+                })()
               ))}
 
               {items.map((item) => {
@@ -1420,7 +1790,8 @@ export default function Home() {
                   left: `${item.x}%`,
                   top: `${item.y}%`,
                   fontSize: `${item.size}px`,
-                  "--item-color": item.color
+                  "--item-color": item.color,
+                  "--highlight-color": item.highlightColor ?? "transparent"
                 } as CSSProperties;
 
                 return (
@@ -1429,6 +1800,8 @@ export default function Home() {
                     type="button"
                     className={`sheet-item sheet-${tool.kind} tool-${item.toolId} ${
                       selectedId === item.id ? "selected" : ""
+                    } ${item.highlightColor ? "has-highlight" : ""} ${
+                      item.comment ? "has-comment" : ""
                     }`}
                     style={itemStyle}
                     onPointerDown={(event) => handleItemPointerDown(event, item)}
@@ -1440,7 +1813,14 @@ export default function Home() {
                     }}
                     title={tool.name}
                   >
-                    {renderToolGlyph(item.toolId, displayLabel)}
+                    <span className="item-content">
+                      {renderToolGlyph(item.toolId, displayLabel)}
+                    </span>
+                    {item.comment && (
+                      <span className="comment-badge" title={item.comment}>
+                        <MessageSquare size={10} />
+                      </span>
+                    )}
                   </button>
                 );
               })}
@@ -1457,7 +1837,7 @@ export default function Home() {
               aria-expanded={!collapsedPanels.tools}
             >
               <Keyboard size={18} />
-              <span>記号</span>
+              <span>ツール</span>
               <ChevronDown
                 className={`section-chevron ${
                   collapsedPanels.tools ? "collapsed" : ""
@@ -1604,37 +1984,98 @@ export default function Home() {
                     <Plus size={18} />
                   </button>
                 </div>
-                <div className="diction-presets" aria-label="滑舌・発音候補">
-                  {DICTION_MARKS.map((mark) => (
-                    <button
-                      key={mark.value}
-                      type="button"
-                      className={dictionMark === mark.value ? "active" : ""}
-                      onClick={() => {
-                        setDictionMark(mark.value);
-                        setActiveTool("diction");
-                        setStatus(`${formatDictionMark(mark.value)}を入力`);
-                      }}
-                      title={mark.note}
-                    >
-                      <span>{mark.value}</span>
-                      <small>{mark.note}</small>
-                    </button>
+                <p className="preset-label">よく使う</p>
+                <div className="diction-presets" aria-label="ピン止め候補">
+                  {pinnedDictionOptions.map((mark) => (
+                    <div className="diction-option" key={`pinned-${mark.value}`}>
+                      <button
+                        type="button"
+                        className={`diction-mark-button ${
+                          dictionMark === mark.value ? "active" : ""
+                        }`}
+                        onClick={() => {
+                          setDictionMark(mark.value);
+                          setActiveTool("diction");
+                          setStatus(`${formatDictionMark(mark.value)}を入力`);
+                        }}
+                        title={mark.note}
+                      >
+                        <span>{mark.value}</span>
+                        <small>{mark.note}</small>
+                      </button>
+                      <button
+                        type="button"
+                        className="pin-button pinned"
+                        onClick={() => toggleDictionPin(mark.value)}
+                        title="ピン止めを外す"
+                      >
+                        <Pin size={12} />
+                      </button>
+                    </div>
                   ))}
+                </div>
+                <p className="preset-label">すべて</p>
+                <div className="diction-presets" aria-label="滑舌・発音候補">
+                  {DICTION_MARKS.map((mark) => {
+                    const isPinned = pinnedDictionMarks.includes(mark.value);
+
+                    return (
+                      <div className="diction-option" key={mark.value}>
+                        <button
+                          type="button"
+                          className={`diction-mark-button ${
+                            dictionMark === mark.value ? "active" : ""
+                          }`}
+                          onClick={() => {
+                            setDictionMark(mark.value);
+                            setActiveTool("diction");
+                            setStatus(`${formatDictionMark(mark.value)}を入力`);
+                          }}
+                          title={mark.note}
+                        >
+                          <span>{mark.value}</span>
+                          <small>{mark.note}</small>
+                        </button>
+                        <button
+                          type="button"
+                          className={`pin-button ${isPinned ? "pinned" : ""}`}
+                          onClick={() => toggleDictionPin(mark.value)}
+                          title={isPinned ? "ピン止めを外す" : "ピン止め"}
+                        >
+                          <Pin size={12} />
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
 
                 <label className="field-label" htmlFor="sectionName">
-                  セクション
+                  セクション・録音メモ
                 </label>
                 <div className="section-editor">
                   <select
-                    aria-label="段"
-                    value={sectionRow}
-                    onChange={(event) => setSectionRow(Number(event.target.value))}
+                    aria-label="開始段"
+                    value={sectionStartRow}
+                    onChange={(event) => {
+                      const nextRow = Number(event.target.value);
+                      setSectionStartRow(nextRow);
+                      setSectionEndRow((current) => Math.max(current, nextRow));
+                    }}
                   >
                     {SYSTEMS.map((_, rowIndex) => (
                       <option key={rowIndex} value={rowIndex}>
-                        {rowIndex + 1}段目
+                        開始 {rowIndex + 1}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    aria-label="終了段"
+                    value={sectionEndRow}
+                    onChange={(event) => setSectionEndRow(Number(event.target.value))}
+                  >
+                    {SYSTEMS.map((_, rowIndex) => (
+                      <option key={rowIndex} value={rowIndex}>
+                        終了 {rowIndex + 1}
                       </option>
                     ))}
                   </select>
@@ -1649,6 +2090,28 @@ export default function Home() {
                       </option>
                     ))}
                   </select>
+                </div>
+                <input
+                  aria-label="自由入力のセクション名"
+                  value={sectionName}
+                  onChange={(event) => setSectionName(event.target.value)}
+                  placeholder="自由入力"
+                />
+                <div className="measure-editor">
+                  <input
+                    aria-label="曲中の開始小節"
+                    placeholder="開始小節"
+                    value={sectionStartMeasure}
+                    onChange={(event) => setSectionStartMeasure(event.target.value)}
+                  />
+                  <input
+                    aria-label="録音スタート小節"
+                    placeholder="録音スタート"
+                    value={sectionRecordingStartMeasure}
+                    onChange={(event) =>
+                      setSectionRecordingStartMeasure(event.target.value)
+                    }
+                  />
                   <button
                     type="button"
                     className="square-button"
@@ -1658,24 +2121,55 @@ export default function Home() {
                     <Plus size={18} />
                   </button>
                 </div>
-                <input
-                  aria-label="自由入力のセクション名"
-                  value={sectionName}
-                  onChange={(event) => setSectionName(event.target.value)}
-                  placeholder="自由入力"
-                />
-                <div className="section-chips" aria-label="設定済みセクション">
-                  {sections.map((section) => (
-                    <button
-                      key={`${section.rowIndex}-${section.id}`}
-                      type="button"
+                <div className="recording-order-list" aria-label="録音順">
+                  {normalizedSections.map((section, index) => (
+                    <div
+                      key={section.id}
+                      className="recording-section"
                       style={{ "--section-color": section.color } as CSSProperties}
-                      onClick={() => removeSection(section.rowIndex)}
-                      title="クリックで外す"
                     >
-                      <span>{section.rowIndex + 1}</span>
-                      {section.name}
-                    </button>
+                      <button
+                        type="button"
+                        className="section-edit-button"
+                        onClick={() => fillSectionForm(section)}
+                        title="入力欄へ反映"
+                      >
+                        <strong>{section.name}</strong>
+                        <small>
+                          {getSectionStartRow(section) + 1}
+                          {getSectionEndRow(section) !== getSectionStartRow(section)
+                            ? `-${getSectionEndRow(section) + 1}`
+                            : ""}
+                          段 / {section.startMeasure || "-"}小節 / 録
+                          {section.recordingStartMeasure || "-"}
+                        </small>
+                      </button>
+                      <div className="section-order-actions">
+                        <button
+                          type="button"
+                          onClick={() => moveSection(section.id, -1)}
+                          disabled={index === 0}
+                          title="上へ"
+                        >
+                          <ArrowUp size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => moveSection(section.id, 1)}
+                          disabled={index === normalizedSections.length - 1}
+                          title="下へ"
+                        >
+                          <ArrowDown size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeSection(section.id)}
+                          title="外す"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
                   ))}
                 </div>
 
@@ -1758,6 +2252,50 @@ export default function Home() {
                     }
                   />
                 </div>
+
+                {["lyric", "vowel"].includes(selectedItem.toolId) && (
+                  <div className="lyric-marker-tools">
+                    <label className="field-label">歌詞マーカー</label>
+                    <div className="marker-swatches" aria-label="マーカー色">
+                      {HIGHLIGHT_SWATCHES.map((color) => (
+                        <button
+                          key={color}
+                          type="button"
+                          style={{ backgroundColor: color }}
+                          onClick={() =>
+                            updateItem(selectedItem.id, { highlightColor: color })
+                          }
+                          title={color}
+                        />
+                      ))}
+                      <button
+                        type="button"
+                        className="clear-marker"
+                        onClick={() =>
+                          updateItem(selectedItem.id, {
+                            highlightColor: "",
+                            comment: ""
+                          })
+                        }
+                      >
+                        解除
+                      </button>
+                    </div>
+                    <label className="field-label" htmlFor="itemComment">
+                      コメント
+                    </label>
+                    <textarea
+                      id="itemComment"
+                      value={selectedItem.comment ?? ""}
+                      onChange={(event) =>
+                        updateItem(selectedItem.id, {
+                          comment: event.target.value
+                        })
+                      }
+                      rows={3}
+                    />
+                  </div>
+                )}
 
                 <div className="button-row">
                   <button
