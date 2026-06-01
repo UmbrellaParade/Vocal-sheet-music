@@ -104,6 +104,7 @@ type DraftData = {
   lyricDisplayMode?: LyricDisplayMode;
   pinnedDictionMarks?: string[];
   autoScrollSettings?: AutoScrollSettings;
+  sunoText?: string;
 };
 
 type SectionEntry = {
@@ -133,6 +134,7 @@ type AutoScrollSettings = {
 
 type PanelId =
   | "lyrics"
+  | "suno"
   | "audio"
   | "scroll"
   | "share"
@@ -551,6 +553,54 @@ function decodeShareData(payload: string) {
   return JSON.parse(new TextDecoder().decode(bytes)) as Partial<DraftData>;
 }
 
+function normalizeDigits(value: string) {
+  return value.replace(/[０-９]/g, (character) =>
+    String.fromCharCode(character.charCodeAt(0) - 0xfee0)
+  );
+}
+
+function getSectionNumber(sectionName: string) {
+  return normalizeDigits(sectionName).match(/\d+/)?.[0] ?? "1";
+}
+
+function getSunoMetaTag(sectionName: string) {
+  const compactName = normalizeDigits(sectionName).replace(/\s+/g, "");
+
+  if (/^\[[^\]]+\]$/.test(compactName)) {
+    return compactName;
+  }
+
+  if (compactName.includes("イントロ")) {
+    return "[Intro]";
+  }
+
+  if (compactName.includes("ギターソロ") || /guitarsolo/i.test(compactName)) {
+    return "[Guitar solo]";
+  }
+
+  if (compactName.includes("アウトロ")) {
+    return "[Outro]";
+  }
+
+  if (compactName.includes("Aメロ")) {
+    return `[Verse${getSectionNumber(compactName)}]`;
+  }
+
+  if (compactName.includes("Bメロ")) {
+    return `[Prechorus${getSectionNumber(compactName)}]`;
+  }
+
+  if (compactName.includes("サビ")) {
+    return `[Chorus${getSectionNumber(compactName)}]`;
+  }
+
+  if (compactName.includes("間奏") || compactName.includes("Cメロ")) {
+    return `[Bridge${getSectionNumber(compactName)}]`;
+  }
+
+  return `[${sectionName.trim() || "Section"}]`;
+}
+
 function isEditableTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) {
     return false;
@@ -710,6 +760,7 @@ export default function Home() {
     DEFAULT_PINNED_DICTION_MARKS
   );
   const [sharePayload, setSharePayload] = useState("");
+  const [sunoText, setSunoText] = useState("");
   const [autoScrollSettings, setAutoScrollSettings] =
     useState<AutoScrollSettings>(DEFAULT_AUTO_SCROLL_SETTINGS);
   const [isAutoScrolling, setIsAutoScrolling] = useState(false);
@@ -725,6 +776,7 @@ export default function Home() {
     Record<PanelId, boolean>
   >({
     lyrics: false,
+    suno: false,
     audio: false,
     scroll: false,
     share: false,
@@ -820,7 +872,8 @@ export default function Home() {
       showChords,
       lyricDisplayMode,
       pinnedDictionMarks,
-      autoScrollSettings
+      autoScrollSettings,
+      sunoText
     }),
     [
       autoScrollSettings,
@@ -831,6 +884,7 @@ export default function Home() {
       readingLyrics,
       sections,
       showChords,
+      sunoText,
       sourceLyrics,
       vowelLyrics
     ]
@@ -969,6 +1023,7 @@ export default function Home() {
       ...DEFAULT_AUTO_SCROLL_SETTINGS,
       ...(nextDraft.autoScrollSettings ?? {})
     });
+    setSunoText(nextDraft.sunoText ?? "");
     setIsAutoScrolling(false);
     setAutoScrollElapsed(0);
     setSelectedId("");
@@ -1127,7 +1182,8 @@ export default function Home() {
       showChords: true,
       lyricDisplayMode: "original",
       pinnedDictionMarks: DEFAULT_PINNED_DICTION_MARKS,
-      autoScrollSettings: DEFAULT_AUTO_SCROLL_SETTINGS
+      autoScrollSettings: DEFAULT_AUTO_SCROLL_SETTINGS,
+      sunoText: ""
     });
     setStatus("新規作成しました");
   }, [hydrateDraft]);
@@ -1600,6 +1656,90 @@ export default function Home() {
     }
   };
 
+  const createSunoText = () => {
+    const lyricItems = items.filter((item) => item.toolId === "lyric");
+    const sectionsForSuno =
+      normalizedSections.length > 0
+        ? normalizedSections
+        : [
+            {
+              id: "suno-default",
+              name: "Aメロ1",
+              rowIndex: 0,
+              startRow: 0,
+              endRow: SYSTEMS.length - 1,
+              color: SECTION_COLORS[0]
+            } satisfies SectionEntry
+          ];
+
+    const getItemRowIndex = (item: SheetItem) => {
+      const rowIndex = SYSTEMS.findIndex(
+        (system) => item.y >= system.top && item.y <= system.top + system.height
+      );
+      return rowIndex >= 0 ? rowIndex : 0;
+    };
+
+    const getLyricsForSection = (section: SectionEntry) => {
+      const startRow = getSectionStartRow(section);
+      const endRow = getSectionEndRow(section);
+      const rows = new Map<number, SheetItem[]>();
+
+      lyricItems.forEach((item) => {
+        const rowIndex = getItemRowIndex(item);
+        if (rowIndex < startRow || rowIndex > endRow) {
+          return;
+        }
+
+        rows.set(rowIndex, [...(rows.get(rowIndex) ?? []), item]);
+      });
+
+      return [...rows.entries()]
+        .sort(([rowA], [rowB]) => rowA - rowB)
+        .map(([, rowItems]) =>
+          rowItems
+            .slice()
+            .sort((a, b) => a.x - b.x)
+            .map((item) => item.label)
+            .join(" ")
+            .trim()
+        )
+        .filter(Boolean)
+        .join("\n");
+    };
+
+    const nextSunoText = sectionsForSuno
+      .map((section, index) => {
+        const tag = getSunoMetaTag(section.name);
+        const sectionLyrics = lyricItems.length
+          ? getLyricsForSection(section)
+          : index === 0
+            ? sourceLyrics.trim()
+            : "";
+
+        return [tag, sectionLyrics].filter(Boolean).join("\n");
+      })
+      .join("\n\n");
+
+    setSunoText(nextSunoText);
+    setStatus("Sunoタグへ変換しました");
+    return nextSunoText;
+  };
+
+  const copySunoText = async () => {
+    try {
+      const text = sunoText || createSunoText();
+      if (!text) {
+        setStatus("コピーするSuno用テキストなし");
+        return;
+      }
+
+      await navigator.clipboard?.writeText(text);
+      setStatus("Suno用テキストをコピーしました");
+    } catch {
+      setStatus("Suno用テキストをコピーできませんでした");
+    }
+  };
+
   const updateMeta = (key: keyof SheetMeta, value: string) => {
     setMeta((current) => ({ ...current, [key]: value }));
   };
@@ -1752,6 +1892,55 @@ export default function Home() {
                   <Plus size={16} />
                   <span>母音を配置</span>
                 </button>
+              </>
+            )}
+          </section>
+
+          <section className="panel-section suno-panel">
+            <button
+              type="button"
+              className="section-heading section-toggle"
+              onClick={() => togglePanel("suno")}
+              aria-expanded={!collapsedPanels.suno}
+            >
+              <Wand2 size={18} />
+              <span>Suno</span>
+              <ChevronDown
+                className={`section-chevron ${
+                  collapsedPanels.suno ? "collapsed" : ""
+                }`}
+                size={18}
+              />
+            </button>
+            {!collapsedPanels.suno && (
+              <>
+                <div className="button-row">
+                  <button
+                    type="button"
+                    className="control-button"
+                    onClick={createSunoText}
+                  >
+                    <FileJson size={16} />
+                    <span>変換</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="control-button"
+                    onClick={() => void copySunoText()}
+                  >
+                    <Copy size={16} />
+                    <span>コピー</span>
+                  </button>
+                </div>
+                <label className="field-label" htmlFor="sunoText">
+                  Suno用テキスト
+                </label>
+                <textarea
+                  id="sunoText"
+                  value={sunoText}
+                  onChange={(event) => setSunoText(event.target.value)}
+                  rows={8}
+                />
               </>
             )}
           </section>
