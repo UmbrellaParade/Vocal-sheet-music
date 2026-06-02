@@ -168,6 +168,7 @@ type SectionEntry = {
   startMeasure?: string;
   recordingStartMeasure?: string;
   color: string;
+  toplineTags?: string[]; // トップライン（作曲用）アレンジタグ
 };
 
 type LyricDisplayMode = "original" | "reading" | "vowel" | "topline";
@@ -638,6 +639,21 @@ const SECTION_COLORS = [
   "#475569"
 ];
 
+// トップライン（作曲用）アレンジタグ定義
+const TOPLINE_TAG_OPTIONS: { id: string; label: string; color: string }[] = [
+  { id: "harmony",       label: "ハモリ",    color: "#2563eb" },
+  { id: "harmony_lyric", label: "歌ハモ",    color: "#3b82f6" },
+  { id: "harmony_fu",    label: "Fuハモ",    color: "#60a5fa" },
+  { id: "double",        label: "DBL",       color: "#7c3aed" },
+  { id: "double_phrase", label: "P-DBL",     color: "#9333ea" },
+  { id: "double_word",   label: "W-DBL",     color: "#a855f7" },
+  { id: "chorus",        label: "コーラス",  color: "#ea580c" },
+  { id: "unison",        label: "ユニゾン",  color: "#0891b2" },
+  { id: "oct_up",        label: "+8va",      color: "#059669" },
+  { id: "oct_down",      label: "-8va",      color: "#16a34a" },
+  { id: "effect",        label: "FX",        color: "#dc2626" },
+];
+
 const DEFAULT_SECTIONS: SectionEntry[] = [
   {
     id: "section-a1",
@@ -902,7 +918,8 @@ function normalizeSections(sections: SectionEntry[] | undefined) {
         order: section.order ?? index,
         startMeasure: section.startMeasure ?? "",
         recordingStartMeasure: section.recordingStartMeasure ?? "",
-        color: section.color ?? SECTION_COLORS[index % SECTION_COLORS.length]
+        color: section.color ?? SECTION_COLORS[index % SECTION_COLORS.length],
+        toplineTags: section.toplineTags ?? []
       };
     })
     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
@@ -3895,6 +3912,22 @@ export default function Home() {
     setStatus("セクションを外しました");
   };
 
+  // トップラインタグのトグル（追加 / 解除）
+  const toggleSectionToplineTag = (sectionId: string, tagId: string) => {
+    setSections((current) =>
+      normalizeSections(current).map((section) => {
+        if (section.id !== sectionId) {
+          return section;
+        }
+        const tags = section.toplineTags ?? [];
+        const next = tags.includes(tagId)
+          ? tags.filter((t) => t !== tagId)
+          : [...tags, tagId];
+        return { ...section, toplineTags: next };
+      })
+    );
+  };
+
   const moveSection = (sectionId: string, direction: -1 | 1) => {
     setSections((current) => {
       const ordered = normalizeSections(current);
@@ -4983,6 +5016,24 @@ export default function Home() {
                           >
                             <strong>{sectionLabel}</strong>
                             {measureLabel && <small>{measureLabel}</small>}
+                            {/* トップラインタグチップ（セクション帯） */}
+                            {lyricDisplayMode === "topline" &&
+                              (sectionSlot?.section.toplineTags ?? []).length > 0 && (
+                                <span className="topline-tag-band">
+                                  {(sectionSlot!.section.toplineTags ?? []).map((tagId) => {
+                                    const tag = TOPLINE_TAG_OPTIONS.find((t) => t.id === tagId);
+                                    return tag ? (
+                                      <span
+                                        key={tagId}
+                                        className="topline-tag-chip"
+                                        style={{ background: tag.color }}
+                                      >
+                                        {tag.label}
+                                      </span>
+                                    ) : null;
+                                  })}
+                                </span>
+                              )}
                           </span>
                           <span className="chord-lane-label" aria-label="コード欄" />
                         </div>
@@ -5114,6 +5165,52 @@ export default function Home() {
         </section>
 
         <aside className="side-panel right-panel">
+          {/* トップラインタグ編集パネル（トップラインモード時のみ表示） */}
+          {lyricDisplayMode === "topline" && (
+            <section className="panel-section topline-tag-panel">
+              <div className="section-heading">
+                <Music2 size={18} />
+                <span>トップライン設定</span>
+              </div>
+              <div className="topline-tag-editor">
+                {normalizedSections.length === 0 ? (
+                  <p className="topline-tag-empty">セクションを追加してください</p>
+                ) : (
+                  normalizedSections.map((section) => (
+                    <div key={section.id} className="topline-tag-row">
+                      <span
+                        className="topline-tag-section-name"
+                        style={{ borderLeftColor: section.color }}
+                      >
+                        {section.name}
+                      </span>
+                      <div className="topline-tag-buttons">
+                        {TOPLINE_TAG_OPTIONS.map((tag) => {
+                          const active = (section.toplineTags ?? []).includes(tag.id);
+                          return (
+                            <button
+                              key={tag.id}
+                              type="button"
+                              className={`topline-tag-toggle ${active ? "active" : ""}`}
+                              style={
+                                active
+                                  ? { background: tag.color, color: "#fff", borderColor: tag.color }
+                                  : { borderColor: tag.color, color: tag.color }
+                              }
+                              onClick={() => toggleSectionToplineTag(section.id, tag.id)}
+                            >
+                              {tag.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </section>
+          )}
+
           <section className="panel-section tool-palette">
             <button
               type="button"

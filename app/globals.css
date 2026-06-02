@@ -893,6 +893,89 @@ kbd {
   box-shadow: 0 4px 12px rgba(124, 58, 237, 0.25);
 }
 
+/* ── トップラインタグ（セクション帯） ── */
+
+.topline-tag-band {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-top: 3px;
+}
+
+.topline-tag-chip {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: 0.02em;
+  line-height: 1.4;
+}
+
+/* ── トップラインタグ編集パネル ── */
+
+.topline-tag-panel .section-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  font-weight: 800;
+  font-size: 14px;
+  color: var(--accent-strong);
+  border-bottom: 1px solid var(--line);
+}
+
+.topline-tag-editor {
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.topline-tag-empty {
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+  padding: 8px 0;
+}
+
+.topline-tag-row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.topline-tag-section-name {
+  font-size: 12px;
+  font-weight: 800;
+  padding-left: 8px;
+  border-left: 3px solid #0891b2;
+  color: #1e293b;
+}
+
+.topline-tag-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.topline-tag-toggle {
+  padding: 2px 8px;
+  border-radius: 12px;
+  border: 1.5px solid;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+  background: transparent;
+  transition: background 0.1s, color 0.1s;
+  line-height: 1.5;
+}
+
+.topline-tag-toggle:hover {
+  opacity: 0.8;
+}
+
 .segmented-control button {
   min-height: 30px;
   padding: 0 10px;
