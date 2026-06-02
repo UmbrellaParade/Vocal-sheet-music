@@ -1,4 +1,4 @@
-import { normalizeForSinging, roughHiragana } from "@/lib/japanese";
+import { convertPreservingKatakana, normalizeForSinging, roughHiragana } from "@/lib/japanese";
 
 export const runtime = "nodejs";
 
@@ -36,10 +36,9 @@ export async function POST(request: Request) {
 
   try {
     const converter = await getConverter();
-    const reading = await converter.convert(text, {
-      to: "hiragana",
-      mode: "normal"
-    });
+    const reading = await convertPreservingKatakana(text, (segment) =>
+      converter.convert(segment, { to: "hiragana", mode: "normal" })
+    );
 
     return Response.json({
       reading: normalizeForSinging(reading),

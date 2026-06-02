@@ -71,14 +71,33 @@ const VOWEL_GROUPS: Record<string, string> = {
   お: "おこそとのほもよろをごぞどぼぽぉょ"
 };
 
+// カタカナ → ひらがな（母音抽出など内部処理用）
 export function katakanaToHiragana(input: string) {
-  return input.replace(/[\u30a1-\u30f6]/g, (char) =>
+  return input.replace(/[ァ-ヶ]/g, (char) =>
     String.fromCharCode(char.charCodeAt(0) - 0x60)
   );
 }
 
+// カタカナを保護してから変換関数を呼び、終わったら元に戻す（非同期版）
+// 例: "東京タワー" → kuroshiro → "とうきょうタワー"
+export async function convertPreservingKatakana(
+  text: string,
+  convert: (segment: string) => Promise<string>
+): Promise<string> {
+  // カタカナ区間（ァ-ン + ー）と非カタカナ区間に分割
+  // split の奇数インデックス部分がカタカナ
+  const parts = text.split(/([ァ-ヶー]+)/);
+  const results = await Promise.all(
+    parts.map((part, index) =>
+      index % 2 === 1 ? Promise.resolve(part) : convert(part)
+    )
+  );
+  return results.join("");
+}
+
 export function normalizeForSinging(input: string) {
-  return katakanaToHiragana(input)
+  // カタカナはひらがなに変換しない（カタカナはそのまま保持）
+  return input
     .replace(/[「」『』【】（）()［\][\]{}]/g, "")
     .replace(/[！？!?]/g, " ")
     .replace(/[、。,.]/g, " ")
@@ -93,6 +112,7 @@ export function roughHiragana(input: string) {
     input
   );
 
+  // カタカナは保持したまま正規化のみ行う
   return normalizeForSinging(converted);
 }
 
@@ -107,7 +127,8 @@ function getVowel(char: string) {
 }
 
 export function toVowels(input: string) {
-  const text = normalizeForSinging(input);
+  // 母音抽出のためカタカナをひらがなに変換してから処理
+  const text = normalizeForSinging(katakanaToHiragana(input));
   const result: string[] = [];
   let previousVowel = "";
 

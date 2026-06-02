@@ -41,7 +41,7 @@ import {
   useState
 } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
-import { normalizeForSinging, roughHiragana, toVowels } from "@/lib/japanese";
+import { convertPreservingKatakana, normalizeForSinging, roughHiragana, toVowels } from "@/lib/japanese";
 
 type ToolId =
   | "lyric"
@@ -728,10 +728,9 @@ async function getBrowserReadingConverter() {
 
 async function convertWithBrowserKuromoji(text: string) {
   const converter = await getBrowserReadingConverter();
-  const reading = await converter.convert(text, {
-    to: "hiragana",
-    mode: "normal"
-  });
+  const reading = await convertPreservingKatakana(text, (segment) =>
+    converter.convert(segment, { to: "hiragana", mode: "normal" })
+  );
 
   return normalizeForSinging(reading);
 }
