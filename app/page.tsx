@@ -1116,6 +1116,33 @@ function flattenLyricLines(input: string) {
   return splitLinesForPlacement(input);
 }
 
+// readingLyrics テキスト内の targetIndex 番目の歌詞行を newValue に置き換える
+// セクションヘッダー行（Aメロ1 等）はカウントしない
+function updateReadingLyricsLine(text: string, targetIndex: number, newValue: string): string {
+  const lines = text.split(/\r?\n/);
+  let lyricLineCount = 0;
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const trimmed = lines[i].trim();
+    if (!trimmed) {
+      continue;
+    }
+
+    if (getSectionLabelFromHeading(trimmed)) {
+      continue; // セクションヘッダーはスキップ
+    }
+
+    if (lyricLineCount === targetIndex) {
+      lines[i] = newValue;
+      return lines.join("\n");
+    }
+
+    lyricLineCount += 1;
+  }
+
+  return text; // 対応行が見つからない場合はそのまま返す
+}
+
 function convertSectionedTextToVowels(input: string) {
   const blocks = parseSectionedLyrics(input);
   if (!blocks.length) {
@@ -2368,8 +2395,26 @@ export default function Home() {
           };
         })
       );
+
+      // ひらがなモードで編集した場合、左パネルの「読み」テキストも同期する
+      if (lyricDisplayMode === "reading") {
+        const sortedLyricItems = items
+          .filter((item) => item.toolId === "lyric")
+          .slice()
+          .sort(
+            (a, b) =>
+              getItemGlobalRowIndex(a) - getItemGlobalRowIndex(b) || a.x - b.x
+          );
+        const itemIndex = sortedLyricItems.findIndex((item) => item.id === id);
+
+        if (itemIndex >= 0) {
+          setReadingLyrics((prev) =>
+            updateReadingLyricsLine(prev, itemIndex, label)
+          );
+        }
+      }
     },
-    [lyricDisplayMode, readingCorrectionEntries]
+    [items, lyricDisplayMode, readingCorrectionEntries]
   );
 
   const removeSelected = useCallback(() => {
@@ -2621,6 +2666,15 @@ export default function Home() {
     try {
       const data = await convertTextToReadingPreservingSections(sourceLyrics);
       setReadingLyrics(data.reading);
+      // 古い readingLabel（カタカナがひらがなに潰れたものなど）をクリアして
+      // 新しい readingLyrics の内容を正しく反映させる
+      setItems((current) =>
+        current.map((item) =>
+          item.toolId === "lyric"
+            ? { ...item, readingLabel: undefined, vowelLabel: undefined }
+            : item
+        )
+      );
       setStatus(
         data.source === "kuromoji" || data.source === "browser-kuromoji"
           ? "変換しました"
