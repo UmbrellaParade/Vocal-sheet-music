@@ -139,6 +139,17 @@ type AutoScrollSettings = {
   followAudio: boolean;
 };
 
+type LyricSectionBlock = {
+  label: string;
+  originalHeading: string;
+  lines: string[];
+};
+
+type ReadingResult = {
+  reading: string;
+  source: string;
+};
+
 type ParsedMidiNote = {
   pitch: number;
   velocity: number;
@@ -650,6 +661,12 @@ function normalizeDigits(value: string) {
   );
 }
 
+function normalizeFullWidthAlnum(value: string) {
+  return value.replace(/[Ａ-Ｚａ-ｚ０-９]/g, (character) =>
+    String.fromCharCode(character.charCodeAt(0) - 0xfee0)
+  );
+}
+
 function splitLinesForPlacement(input: string) {
   return input
     .split(/\r?\n/)
@@ -666,6 +683,250 @@ function getLyricPlacementY(
   const vowelOffset = layoutMode === "staff" ? 0.07 : 0.1;
   const laneRatio = toolId === "vowel" ? baseRatio + vowelOffset : baseRatio;
   return system.top + system.height * laneRatio;
+}
+
+function normalizeSectionHeadingText(value: string) {
+  return normalizeFullWidthAlnum(value)
+    .trim()
+    .replace(/^#+\s*/, "")
+    .replace(/^[\[【「『(（]+/, "")
+    .replace(/[\]】」』)）]+$/, "")
+    .replace(/[：:]$/, "")
+    .trim();
+}
+
+function compactSectionKey(value: string) {
+  return normalizeSectionHeadingText(value)
+    .replace(/[\s　_-]+/g, "")
+    .toLowerCase();
+}
+
+function getSectionBaseKey(value: string) {
+  const key = compactSectionKey(value);
+  if (/^aメロ\d*$/.test(key)) {
+    return "aメロ";
+  }
+  if (/^bメロ\d*$/.test(key)) {
+    return "bメロ";
+  }
+  if (/^cメロ\d*$/.test(key)) {
+    return "cメロ";
+  }
+  if (/^dメロ\d*$/.test(key)) {
+    return "dメロ";
+  }
+  if (/^サビ\d*$/.test(key)) {
+    return "サビ";
+  }
+  if (/^間奏\d*$/.test(key)) {
+    return "間奏";
+  }
+  if (/^イントロ\d*$/.test(key)) {
+    return "イントロ";
+  }
+  if (/^アウトロ\d*$/.test(key)) {
+    return "アウトロ";
+  }
+  if (/^ギターソロ\d*$/.test(key)) {
+    return "ギターソロ";
+  }
+  return key;
+}
+
+function getSectionLabelFromHeading(line: string) {
+  const heading = normalizeSectionHeadingText(line);
+  const key = compactSectionKey(heading);
+
+  let match = key.match(/^aメロ(\d*)$/);
+  if (match) {
+    return `Aメロ${match[1] || ""}`;
+  }
+
+  match = key.match(/^bメロ(\d*)$/);
+  if (match) {
+    return `Bメロ${match[1] || ""}`;
+  }
+
+  match = key.match(/^cメロ(\d*)$/);
+  if (match) {
+    return `Cメロ${match[1] || ""}`;
+  }
+
+  match = key.match(/^dメロ(\d*)$/);
+  if (match) {
+    return `Dメロ${match[1] || ""}`;
+  }
+
+  match = key.match(/^サビ(\d*)$/);
+  if (match) {
+    return `サビ${match[1] || ""}`;
+  }
+
+  if (/^ラスサビ$/.test(key)) {
+    return "ラスサビ";
+  }
+
+  match = key.match(/^イントロ(\d*)$/);
+  if (match) {
+    return `イントロ${match[1] || ""}`;
+  }
+
+  match = key.match(/^間奏(\d*)$/);
+  if (match) {
+    return `間奏${match[1] || ""}`;
+  }
+
+  match = key.match(/^アウトロ(\d*)$/);
+  if (match) {
+    return `アウトロ${match[1] || ""}`;
+  }
+
+  match = key.match(/^ギターソロ(\d*)$/);
+  if (match) {
+    return `ギターソロ${match[1] || ""}`;
+  }
+
+  match = key.match(/^verse(\d*)$/);
+  if (match) {
+    return `Aメロ${match[1] || "1"}`;
+  }
+
+  match = key.match(/^prechorus(\d*)$/);
+  if (match) {
+    return `Bメロ${match[1] || ""}`;
+  }
+
+  match = key.match(/^chorus(\d*)$/);
+  if (match) {
+    return `サビ${match[1] || ""}`;
+  }
+
+  match = key.match(/^bridge(\d*)$/);
+  if (match) {
+    return `Cメロ${match[1] || ""}`;
+  }
+
+  if (key === "intro") {
+    return "イントロ";
+  }
+
+  if (key === "outro") {
+    return "アウトロ";
+  }
+
+  if (key === "guitarsolo") {
+    return "ギターソロ";
+  }
+
+  return "";
+}
+
+function parseSectionedLyrics(input: string) {
+  const blocks: LyricSectionBlock[] = [];
+  const preHeadingLines: string[] = [];
+  let currentBlock: LyricSectionBlock | null = null;
+  let foundHeading = false;
+
+  input.split(/\r?\n/).forEach((rawLine) => {
+    const line = rawLine.trim();
+    if (!line) {
+      return;
+    }
+
+    const sectionLabel = getSectionLabelFromHeading(line);
+    if (sectionLabel) {
+      if (currentBlock) {
+        blocks.push(currentBlock);
+      } else if (preHeadingLines.length > 0) {
+        blocks.push({
+          label: "Aメロ1",
+          originalHeading: "Aメロ1",
+          lines: [...preHeadingLines]
+        });
+        preHeadingLines.length = 0;
+      }
+
+      currentBlock = {
+        label: sectionLabel,
+        originalHeading: line,
+        lines: []
+      };
+      foundHeading = true;
+      return;
+    }
+
+    if (currentBlock) {
+      currentBlock.lines.push(line);
+    } else {
+      preHeadingLines.push(line);
+    }
+  });
+
+  if (currentBlock) {
+    blocks.push(currentBlock);
+  }
+
+  return foundHeading ? blocks.filter((block) => block.lines.length > 0) : [];
+}
+
+function convertSectionedTextToVowels(input: string) {
+  const blocks = parseSectionedLyrics(input);
+  if (!blocks.length) {
+    return toVowels(input);
+  }
+
+  return blocks
+    .map((block) => `${block.label}\n${toVowels(block.lines.join("\n"))}`)
+    .join("\n");
+}
+
+function findMatchingSection(
+  sectionLabel: string,
+  candidateSections: SectionEntry[]
+) {
+  const exactKey = compactSectionKey(sectionLabel);
+  const baseKey = getSectionBaseKey(sectionLabel);
+
+  return (
+    candidateSections.find((section) => compactSectionKey(section.name) === exactKey) ??
+    candidateSections.find((section) => getSectionBaseKey(section.name) === baseKey)
+  );
+}
+
+function createSectionsFromLyricBlocks(
+  blocks: LyricSectionBlock[],
+  currentSections: SectionEntry[]
+) {
+  const existingSections = normalizeSections(currentSections);
+  const nextSections: SectionEntry[] = [];
+  let nextRow = 0;
+
+  blocks.forEach((block, index) => {
+    if (nextRow >= SYSTEMS.length) {
+      return;
+    }
+
+    const matchedSection = findMatchingSection(block.label, existingSections);
+    const rowsNeeded = Math.max(block.lines.length, 1);
+    const startRow = nextRow;
+    const endRow = Math.min(SYSTEMS.length - 1, startRow + rowsNeeded - 1);
+
+    nextSections.push({
+      id: matchedSection?.id ?? createId(),
+      name: block.label,
+      rowIndex: startRow,
+      startRow,
+      endRow,
+      order: index,
+      startMeasure: matchedSection?.startMeasure ?? "",
+      recordingStartMeasure: matchedSection?.recordingStartMeasure ?? "",
+      color: matchedSection?.color ?? SECTION_COLORS[index % SECTION_COLORS.length]
+    });
+
+    nextRow = endRow + 1;
+  });
+
+  return normalizeSections(nextSections);
 }
 
 function getSectionNumber(sectionName: string) {
@@ -1455,16 +1716,121 @@ export default function Home() {
     setStatus("削除しました");
   }, [selectedId]);
 
+  const requestReading = useCallback(async (text: string): Promise<ReadingResult> => {
+    if (!text.trim()) {
+      return { reading: "", source: "empty" };
+    }
+
+    try {
+      const response = await fetch("/api/reading", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text })
+      });
+
+      const data = (await response.json()) as Partial<ReadingResult>;
+      return {
+        reading: data.reading ?? roughHiragana(text),
+        source: data.source ?? "fallback"
+      };
+    } catch {
+      return {
+        reading: roughHiragana(text),
+        source: "fallback"
+      };
+    }
+  }, []);
+
+  const convertTextToReadingPreservingSections = useCallback(
+    async (text: string): Promise<ReadingResult> => {
+      const blocks = parseSectionedLyrics(text);
+      if (!blocks.length) {
+        return requestReading(text);
+      }
+
+      const convertedBlocks = await Promise.all(
+        blocks.map(async (block) => {
+          const result = await requestReading(block.lines.join("\n"));
+          return { ...result, label: block.label };
+        })
+      );
+
+      return {
+        reading: convertedBlocks
+          .map((block) => `${block.label}\n${block.reading}`)
+          .join("\n"),
+        source: convertedBlocks.some((block) => block.source !== "kuromoji")
+          ? "fallback"
+          : "kuromoji"
+      };
+    },
+    [requestReading]
+  );
+
+  const buildVowelLyrics = useCallback(async () => {
+    if (readingLyrics.trim()) {
+      return convertSectionedTextToVowels(readingLyrics);
+    }
+
+    const result = await convertTextToReadingPreservingSections(sourceLyrics);
+    return convertSectionedTextToVowels(result.reading);
+  }, [convertTextToReadingPreservingSections, readingLyrics, sourceLyrics]);
+
   const placeTextOnSheet = useCallback(
     (text: string, toolId: Extract<ToolId, "lyric" | "vowel">) => {
+      const sectionBlocks = parseSectionedLyrics(text);
+      const tool = TOOL_BY_ID[toolId];
+      const placedItems: SheetItem[] = [];
+
+      if (sectionBlocks.length > 0) {
+        const nextSections = createSectionsFromLyricBlocks(sectionBlocks, sections);
+        setSections(nextSections);
+
+        sectionBlocks.forEach((block, blockIndex) => {
+          const section = nextSections[blockIndex];
+          if (!section) {
+            return;
+          }
+
+          const startRow = getSectionStartRow(section);
+          const endRow = getSectionEndRow(section);
+          block.lines.slice(0, endRow - startRow + 1).forEach((line, lineIndex) => {
+            const rowIndex = startRow + lineIndex;
+            const system = SYSTEMS[rowIndex];
+            placedItems.push({
+              id: createId(),
+              toolId,
+              label: line,
+              x: LYRIC_LINE_X,
+              y: getLyricPlacementY(system, toolId, sheetLayoutMode),
+              size: tool.size,
+              color: tool.color,
+              width: LYRIC_LINE_WIDTH,
+              align: "left"
+            });
+          });
+        });
+
+        setItems((current) => [...current, ...placedItems]);
+        setSelectedId(placedItems.at(-1)?.id ?? "");
+        const totalLineCount = sectionBlocks.reduce(
+          (sum, block) => sum + block.lines.length,
+          0
+        );
+        const skippedLineCount = totalLineCount - placedItems.length;
+        setStatus(
+          `${tool.name}をセクション別に${placedItems.length}行配置${
+            skippedLineCount > 0 ? ` / 未配置${skippedLineCount}行` : ""
+          }`
+        );
+        return;
+      }
+
       const lines = splitLinesForPlacement(text);
       if (!lines.length) {
         setStatus("配置するテキストなし");
         return;
       }
-
-      const tool = TOOL_BY_ID[toolId];
-      const placedItems: SheetItem[] = [];
 
       lines.slice(0, SYSTEMS.length).forEach((line, rowIndex) => {
         const system = SYSTEMS[rowIndex];
@@ -1490,7 +1856,7 @@ export default function Home() {
         }`
       );
     },
-    [sheetLayoutMode]
+    [sections, sheetLayoutMode]
   );
 
   const convertToReading = useCallback(async () => {
@@ -1498,17 +1864,8 @@ export default function Home() {
     setStatus("ひらがな変換中");
 
     try {
-      const response = await fetch("/api/reading", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: sourceLyrics })
-      });
-
-      const data = (await response.json()) as {
-        reading?: string;
-        source?: string;
-      };
-      setReadingLyrics(data.reading ?? roughHiragana(sourceLyrics));
+      const data = await convertTextToReadingPreservingSections(sourceLyrics);
+      setReadingLyrics(data.reading);
       setStatus(data.source === "kuromoji" ? "変換しました" : "簡易変換しました");
     } catch {
       setReadingLyrics(roughHiragana(sourceLyrics));
@@ -1516,13 +1873,45 @@ export default function Home() {
     } finally {
       setIsConverting(false);
     }
-  }, [sourceLyrics]);
+  }, [convertTextToReadingPreservingSections, sourceLyrics]);
 
-  const convertReadingToVowels = useCallback(() => {
-    const base = readingLyrics || roughHiragana(sourceLyrics);
-    setVowelLyrics(toVowels(base));
-    setStatus("母音に変換しました");
-  }, [readingLyrics, sourceLyrics]);
+  const convertReadingToVowels = useCallback(async () => {
+    setIsConverting(true);
+    setStatus("母音変換中");
+
+    try {
+      const nextVowelLyrics = await buildVowelLyrics();
+      setVowelLyrics(nextVowelLyrics);
+      setStatus("母音に変換しました");
+    } catch {
+      setVowelLyrics(toVowels(roughHiragana(sourceLyrics)));
+      setStatus("簡易母音変換しました");
+    } finally {
+      setIsConverting(false);
+    }
+  }, [buildVowelLyrics, sourceLyrics]);
+
+  const placeVowelsOnSheet = useCallback(async () => {
+    if (vowelLyrics.trim()) {
+      placeTextOnSheet(vowelLyrics, "vowel");
+      return;
+    }
+
+    setIsConverting(true);
+    setStatus("母音変換中");
+
+    try {
+      const nextVowelLyrics = await buildVowelLyrics();
+      setVowelLyrics(nextVowelLyrics);
+      placeTextOnSheet(nextVowelLyrics, "vowel");
+    } catch {
+      const fallbackVowels = toVowels(roughHiragana(sourceLyrics));
+      setVowelLyrics(fallbackVowels);
+      placeTextOnSheet(fallbackVowels, "vowel");
+    } finally {
+      setIsConverting(false);
+    }
+  }, [buildVowelLyrics, placeTextOnSheet, sourceLyrics, vowelLyrics]);
 
   const exportJson = useCallback(() => {
     const blob = new Blob([JSON.stringify(draft, null, 2)], {
@@ -2439,10 +2828,11 @@ export default function Home() {
                   <button
                     type="button"
                     className="control-button"
-                    onClick={convertReadingToVowels}
+                    onClick={() => void convertReadingToVowels()}
+                    disabled={isConverting}
                   >
                     <FileJson size={16} />
-                    <span>母音</span>
+                    <span>{isConverting ? "変換中" : "母音"}</span>
                   </button>
                 </div>
 
@@ -2480,12 +2870,8 @@ export default function Home() {
                 <button
                   type="button"
                   className="wide-button"
-                  onClick={() =>
-                    placeTextOnSheet(
-                      vowelLyrics || toVowels(roughHiragana(sourceLyrics)),
-                      "vowel"
-                    )
-                  }
+                  onClick={() => void placeVowelsOnSheet()}
+                  disabled={isConverting}
                 >
                   <Plus size={16} />
                   <span>母音を配置</span>

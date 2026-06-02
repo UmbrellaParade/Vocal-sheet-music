@@ -234,10 +234,12 @@ button:focus-visible {
   grid-template-columns: 384px minmax(520px, 1fr) 284px;
   grid-template-areas: "left score right";
   gap: 14px;
+  max-width: 100%;
   padding: 16px;
 }
 
 .side-panel {
+  min-width: 0;
   align-self: start;
   display: grid;
   gap: 14px;
@@ -251,6 +253,8 @@ button:focus-visible {
 
 .score-column {
   grid-area: score;
+  min-width: 0;
+  width: 100%;
 }
 
 .right-panel {
@@ -258,6 +262,7 @@ button:focus-visible {
 }
 
 .panel-section {
+  min-width: 0;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.94);
@@ -818,6 +823,7 @@ kbd {
     linear-gradient(rgba(245, 158, 11, 0.08) 1px, transparent 1px),
     #edf4f7;
   background-size: 28px 28px;
+  overscroll-behavior: contain;
 }
 
 .score-page {
@@ -1565,6 +1571,8 @@ kbd {
   .topbar {
     align-items: flex-start;
     flex-direction: column;
+    gap: 12px;
+    padding: 12px;
   }
 
   .top-actions {
@@ -1572,15 +1580,31 @@ kbd {
   }
 
   .workspace {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     grid-template-areas:
       "left"
       "score"
       "right";
+    overflow-x: hidden;
+    gap: 10px;
+    padding: 10px;
   }
 
   .side-panel {
+    width: calc(100vw - 20px);
+    max-width: 100%;
+    overflow: hidden;
     position: static;
+  }
+
+  .score-column {
+    width: calc(100vw - 20px);
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  .panel-section {
+    width: 100%;
   }
 
   .right-panel {
@@ -1589,6 +1613,19 @@ kbd {
 
   .sheet-toolbar {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .lyric-panel {
+    padding: 14px;
+  }
+
+  .lyrics-textarea {
+    min-height: 142px;
+    font-size: 16px;
+  }
+
+  .source-lyrics-textarea {
+    min-height: 218px;
   }
 
   .sheet-view-controls {
@@ -1601,16 +1638,46 @@ kbd {
   }
 
   .score-stage {
+    width: 100%;
+    max-width: 100%;
     min-height: auto;
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
     padding: 10px;
   }
 
   .score-page {
-    width: min(100%, 720px);
+    width: 680px;
+    max-width: none;
+    margin: 0;
   }
 
   .icon-button span {
     display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .brand {
+    min-width: 0;
+  }
+
+  .brand h1 {
+    font-size: 18px;
+  }
+
+  .top-actions {
+    gap: 6px;
+  }
+
+  .icon-button {
+    min-height: 36px;
+    padding: 0 9px;
+  }
+
+  .score-page {
+    width: 640px;
   }
 }
 
