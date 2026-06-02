@@ -41,7 +41,13 @@ import {
   useState
 } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
-import { convertPreservingKatakana, normalizeForSinging, roughHiragana, toVowels } from "@/lib/japanese";
+import {
+  convertPreservingKatakana,
+  normalizeForSinging,
+  parseReadingCorrections,
+  roughHiragana,
+  toVowels
+} from "@/lib/japanese";
 
 type ToolId =
   | "lyric"
@@ -103,6 +109,7 @@ type DraftData = {
   items: SheetItem[];
   sourceLyrics: string;
   readingLyrics: string;
+  readingCorrections?: string;
   vowelLyrics: string;
   sections?: SectionEntry[];
   showChords?: boolean;
@@ -726,10 +733,13 @@ async function getBrowserReadingConverter() {
   return browserReadingConverterPromise;
 }
 
-async function convertWithBrowserKuromoji(text: string) {
+async function convertWithBrowserKuromoji(text: string, correctionText = "") {
   const converter = await getBrowserReadingConverter();
-  const reading = await convertPreservingKatakana(text, (segment) =>
-    converter.convert(segment, { to: "hiragana", mode: "normal" })
+  const corrections = parseReadingCorrections(correctionText);
+  const reading = await convertPreservingKatakana(
+    text,
+    (segment) => converter.convert(segment, { to: "hiragana", mode: "normal" }),
+    corrections
   );
 
   return normalizeForSinging(reading);
@@ -1516,6 +1526,7 @@ export default function Home() {
     "雨上がりの空に 君の声がひびく\n明日へ続く道を もう一度歩こう"
   );
   const [readingLyrics, setReadingLyrics] = useState("");
+  const [readingCorrections, setReadingCorrections] = useState("");
   const [vowelLyrics, setVowelLyrics] = useState("");
   const [quickChord, setQuickChord] = useState("C");
   const [dictionMark, setDictionMark] = useState("K");
@@ -1571,6 +1582,10 @@ export default function Home() {
     [items, selectedId]
   );
   const activeToolSpec = activeTool ? TOOL_BY_ID[activeTool] : null;
+  const readingCorrectionEntries = useMemo(
+    () => parseReadingCorrections(readingCorrections),
+    [readingCorrections]
+  );
 
   const normalizedSections = useMemo(() => normalizeSections(sections), [sections]);
 
@@ -1680,6 +1695,7 @@ export default function Home() {
       items,
       sourceLyrics,
       readingLyrics,
+      readingCorrections,
       vowelLyrics,
       sections,
       showChords,
@@ -1697,6 +1713,7 @@ export default function Home() {
       meta,
       midiMeasuresPerRow,
       pinnedDictionMarks,
+      readingCorrections,
       readingLyrics,
       sections,
       sheetLayoutMode,
@@ -1714,16 +1731,16 @@ export default function Home() {
       }
 
       if (lyricDisplayMode === "reading") {
-        return roughHiragana(item.label);
+        return roughHiragana(item.label, readingCorrectionEntries);
       }
 
       if (lyricDisplayMode === "vowel") {
-        return toVowels(roughHiragana(item.label));
+        return toVowels(roughHiragana(item.label, readingCorrectionEntries));
       }
 
       return item.label;
     },
-    [lyricDisplayMode]
+    [lyricDisplayMode, readingCorrectionEntries]
   );
 
   const replaceAudioSource = useCallback((blob: Blob, name: string) => {
@@ -1899,6 +1916,7 @@ export default function Home() {
     );
     setSourceLyrics(nextDraft.sourceLyrics ?? "");
     setReadingLyrics(nextDraft.readingLyrics ?? "");
+    setReadingCorrections(nextDraft.readingCorrections ?? "");
     setVowelLyrics(nextDraft.vowelLyrics ?? "");
     setSections(normalizeSections(nextDraft.sections));
     setShowChords(nextDraft.showChords ?? true);
@@ -1967,7 +1985,7 @@ export default function Home() {
         const response = await fetch("/api/reading", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text })
+          body: JSON.stringify({ text, corrections: readingCorrections })
         });
 
         if (response.ok) {
@@ -1986,16 +2004,16 @@ export default function Home() {
 
     try {
       return {
-        reading: await convertWithBrowserKuromoji(text),
+        reading: await convertWithBrowserKuromoji(text, readingCorrections),
         source: "browser-kuromoji"
       };
     } catch {
       return {
-        reading: roughHiragana(text),
+        reading: roughHiragana(text, readingCorrectionEntries),
         source: "fallback"
       };
     }
-  }, []);
+  }, [readingCorrectionEntries, readingCorrections]);
 
   const convertTextToReadingPreservingSections = useCallback(
     async (text: string): Promise<ReadingResult> => {
@@ -2140,12 +2158,12 @@ export default function Home() {
           : "簡易変換しました"
       );
     } catch {
-      setReadingLyrics(roughHiragana(sourceLyrics));
+      setReadingLyrics(roughHiragana(sourceLyrics, readingCorrectionEntries));
       setStatus("簡易変換しました");
     } finally {
       setIsConverting(false);
     }
-  }, [convertTextToReadingPreservingSections, sourceLyrics]);
+  }, [convertTextToReadingPreservingSections, readingCorrectionEntries, sourceLyrics]);
 
   const convertReadingToVowels = useCallback(async () => {
     setIsConverting(true);
@@ -2156,12 +2174,12 @@ export default function Home() {
       setVowelLyrics(nextVowelLyrics);
       setStatus("母音に変換しました");
     } catch {
-      setVowelLyrics(toVowels(roughHiragana(sourceLyrics)));
+      setVowelLyrics(toVowels(roughHiragana(sourceLyrics, readingCorrectionEntries)));
       setStatus("簡易母音変換しました");
     } finally {
       setIsConverting(false);
     }
-  }, [buildVowelLyrics, sourceLyrics]);
+  }, [buildVowelLyrics, readingCorrectionEntries, sourceLyrics]);
 
   const placeVowelsOnSheet = useCallback(async () => {
     if (vowelLyrics.trim()) {
@@ -2177,13 +2195,21 @@ export default function Home() {
       setVowelLyrics(nextVowelLyrics);
       placeTextOnSheet(nextVowelLyrics, "vowel");
     } catch {
-      const fallbackVowels = toVowels(roughHiragana(sourceLyrics));
+      const fallbackVowels = toVowels(
+        roughHiragana(sourceLyrics, readingCorrectionEntries)
+      );
       setVowelLyrics(fallbackVowels);
       placeTextOnSheet(fallbackVowels, "vowel");
     } finally {
       setIsConverting(false);
     }
-  }, [buildVowelLyrics, placeTextOnSheet, sourceLyrics, vowelLyrics]);
+  }, [
+    buildVowelLyrics,
+    placeTextOnSheet,
+    readingCorrectionEntries,
+    sourceLyrics,
+    vowelLyrics
+  ]);
 
   const exportJson = useCallback(() => {
     const blob = new Blob([JSON.stringify(draft, null, 2)], {
@@ -2232,6 +2258,7 @@ export default function Home() {
       items: [],
       sourceLyrics: "",
       readingLyrics: "",
+      readingCorrections: "",
       vowelLyrics: "",
       sections: DEFAULT_SECTIONS,
       showChords: true,
@@ -3217,6 +3244,18 @@ export default function Home() {
                     <span>{isConverting ? "変換中" : "母音"}</span>
                   </button>
                 </div>
+
+                <label className="field-label" htmlFor="readingCorrections">
+                  読み補正
+                </label>
+                <textarea
+                  id="readingCorrections"
+                  className="lyrics-textarea compact-lyrics-textarea"
+                  value={readingCorrections}
+                  onChange={(event) => setReadingCorrections(event.target.value)}
+                  rows={3}
+                  placeholder={"踵=きびす\n大人=こ\n映える=ばえる"}
+                />
 
                 <label className="field-label" htmlFor="readingLyrics">
                   読み

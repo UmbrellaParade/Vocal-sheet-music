@@ -1,4 +1,9 @@
-import { convertPreservingKatakana, normalizeForSinging, roughHiragana } from "@/lib/japanese";
+import {
+  convertPreservingKatakana,
+  normalizeForSinging,
+  parseReadingCorrections,
+  roughHiragana
+} from "@/lib/japanese";
 
 export const runtime = "nodejs";
 
@@ -27,8 +32,12 @@ async function getConverter() {
 }
 
 export async function POST(request: Request) {
-  const body = (await request.json().catch(() => ({}))) as { text?: string };
+  const body = (await request.json().catch(() => ({}))) as {
+    text?: string;
+    corrections?: string;
+  };
   const text = body.text?.trim() ?? "";
+  const corrections = parseReadingCorrections(body.corrections ?? "");
 
   if (!text) {
     return Response.json({ reading: "", source: "empty" });
@@ -36,8 +45,10 @@ export async function POST(request: Request) {
 
   try {
     const converter = await getConverter();
-    const reading = await convertPreservingKatakana(text, (segment) =>
-      converter.convert(segment, { to: "hiragana", mode: "normal" })
+    const reading = await convertPreservingKatakana(
+      text,
+      (segment) => converter.convert(segment, { to: "hiragana", mode: "normal" }),
+      corrections
     );
 
     return Response.json({
@@ -46,7 +57,7 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     return Response.json({
-      reading: roughHiragana(text),
+      reading: roughHiragana(text, corrections),
       source: "fallback",
       warning: error instanceof Error ? error.message : "reading failed"
     });
