@@ -3293,15 +3293,22 @@ export default function Home() {
   }, [replaceAudioSource]);
 
   // ドラッグ選択（マーキング・トップラインタグ用）
+  // scoreStageRef に直接リスナーを追加し、passive:false で scroll を preventDefault する
   useEffect(() => {
     if (!dragSelect) {
       return;
     }
 
+    const container = scoreStageRef.current;
+
     const handlePointerMove = (event: PointerEvent) => {
       if (event.pointerId !== dragSelect.pointerId) {
         return;
       }
+      // スクロールを止めてドラッグ選択を優先
+      event.preventDefault();
+      event.stopPropagation();
+
       // ポインター下にある data-item-id 要素を探して選択に追加
       const el = document.elementFromPoint(event.clientX, event.clientY);
       const itemEl = el?.closest("[data-item-id]");
@@ -3318,10 +3325,12 @@ export default function Home() {
       // multiSelectedIds は保持（ユーザーが色/タグを選ぶまで）
     };
 
-    window.addEventListener("pointermove", handlePointerMove);
+    // scoreStage に passive:false でリスナー（scroll を止められる）
+    container?.addEventListener("pointermove", handlePointerMove, { passive: false });
+    // pointerup は window で確実に拾う
     window.addEventListener("pointerup", handlePointerUp, { once: true });
     return () => {
-      window.removeEventListener("pointermove", handlePointerMove);
+      container?.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
     };
   }, [dragSelect]);
@@ -3583,6 +3592,12 @@ export default function Home() {
         return;
       }
       // ドラッグ選択開始：先頭アイテムを選択リストに追加
+      // pointer capture でポインターが他の要素に移っても追跡できる
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch {
+        // setPointerCapture が使えない環境では無視
+      }
       setMultiSelectedIds([item.id]);
       setDragSelect({ pointerId: event.pointerId });
       return;
@@ -5061,6 +5076,10 @@ export default function Home() {
                     // トップラインモード時はツールパネルも切り替え
                     if (mode === "topline") {
                       setToolPanelCategory("topline");
+                      // readingLyrics が空ならひらがな変換を自動実行してひらがな表示にする
+                      if (!readingLyrics.trim() && sourceLyrics.trim()) {
+                        void convertToReading();
+                      }
                     } else if (toolPanelCategory === "topline") {
                       setToolPanelCategory("vocal");
                     }
@@ -5502,6 +5521,9 @@ export default function Home() {
                     onClick={() => {
                       setToolPanelCategory("topline");
                       setLyricDisplayMode("topline");
+                      if (!readingLyrics.trim() && sourceLyrics.trim()) {
+                        void convertToReading();
+                      }
                     }}
                   >
                     トップライン
