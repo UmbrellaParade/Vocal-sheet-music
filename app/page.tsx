@@ -29,7 +29,8 @@ import {
   Trash2,
   Type,
   Upload,
-  Wand2
+  Wand2,
+  X
 } from "lucide-react";
 import * as QRCode from "qrcode";
 import {
@@ -148,6 +149,15 @@ type LyricSectionBlock = {
 type ReadingResult = {
   reading: string;
   source: string;
+};
+
+type PendingSheetTap = {
+  pointerId: number;
+  toolId: ToolId;
+  startClientX: number;
+  startClientY: number;
+  startScrollLeft: number;
+  startScrollTop: number;
 };
 
 type BrowserKuroshiroConverter = {
@@ -1455,9 +1465,10 @@ export default function Home() {
   const midiAccessRef = useRef<MidiAccessLike | null>(null);
   const autoScrollFrameRef = useRef<number | null>(null);
   const autoScrollStartTimeRef = useRef(0);
+  const pendingSheetTapRef = useRef<PendingSheetTap | null>(null);
   const [meta, setMeta] = useState<SheetMeta>(DEFAULT_META);
   const [items, setItems] = useState<SheetItem[]>([]);
-  const [activeTool, setActiveTool] = useState<ToolId>("vibrato");
+  const [activeTool, setActiveTool] = useState<ToolId | "">("");
   const [selectedId, setSelectedId] = useState<string>("");
   const [dragging, setDragging] = useState<{
     id: string;
@@ -1522,6 +1533,7 @@ export default function Home() {
     () => items.find((item) => item.id === selectedId),
     [items, selectedId]
   );
+  const activeToolSpec = activeTool ? TOOL_BY_ID[activeTool] : null;
 
   const normalizedSections = useMemo(() => normalizeSections(sections), [sections]);
 
@@ -1739,6 +1751,29 @@ export default function Home() {
       setStatus(`${tool.name}を追加`);
     },
     [dictionMark, quickChord]
+  );
+
+  const clearActiveTool = useCallback(() => {
+    setActiveTool("");
+    setStatus("記号選択を解除");
+  }, []);
+
+  const clearSelectionAndTool = useCallback(() => {
+    setSelectedId("");
+    setActiveTool("");
+    setStatus("選択を解除");
+  }, []);
+
+  const selectTool = useCallback(
+    (toolId: ToolId) => {
+      const shouldClear = activeTool === toolId;
+      setSelectedId("");
+      setActiveTool(shouldClear ? "" : toolId);
+      setStatus(
+        shouldClear ? "記号選択を解除" : `${TOOL_BY_ID[toolId].name}を選択`
+      );
+    },
+    [activeTool]
   );
 
   const hydrateDraft = useCallback((nextDraft: Partial<DraftData>) => {
@@ -2254,6 +2289,7 @@ export default function Home() {
       );
       if (match) {
         event.preventDefault();
+        setSelectedId("");
         setActiveTool(match.id);
         setStatus(`${match.name}を選択`);
       }
@@ -2270,6 +2306,76 @@ export default function Home() {
 
     const target = event.target as HTMLElement;
     if (target.closest(".sheet-item")) {
+      return;
+    }
+
+    if (!activeTool) {
+      if (selectedId) {
+        clearSelectionAndTool();
+      }
+      return;
+    }
+
+    if (event.pointerType === "touch") {
+      const scoreStage = scoreStageRef.current;
+      const pendingTap: PendingSheetTap = {
+        pointerId: event.pointerId,
+        toolId: activeTool,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        startScrollLeft: scoreStage?.scrollLeft ?? 0,
+        startScrollTop: scoreStage?.scrollTop ?? 0
+      };
+
+      pendingSheetTapRef.current = pendingTap;
+
+      const cleanup = () => {
+        window.removeEventListener("pointerup", handlePointerUp);
+        window.removeEventListener("pointercancel", handlePointerCancel);
+      };
+
+      const finishTap = (pointerEvent: PointerEvent) => {
+        const currentTap = pendingSheetTapRef.current;
+        pendingSheetTapRef.current = null;
+        cleanup();
+
+        if (!currentTap || pointerEvent.pointerId !== currentTap.pointerId) {
+          return;
+        }
+
+        const latestScoreStage = scoreStageRef.current;
+        const movedDistance = Math.hypot(
+          pointerEvent.clientX - currentTap.startClientX,
+          pointerEvent.clientY - currentTap.startClientY
+        );
+        const scrolledDistance = Math.hypot(
+          (latestScoreStage?.scrollLeft ?? 0) - currentTap.startScrollLeft,
+          (latestScoreStage?.scrollTop ?? 0) - currentTap.startScrollTop
+        );
+
+        if (movedDistance > 12 || scrolledDistance > 4) {
+          return;
+        }
+
+        const position = getPointerPosition(
+          pointerEvent.clientX,
+          pointerEvent.clientY
+        );
+        addItemAt(currentTap.toolId, position.x, position.y);
+        setActiveTool("");
+      };
+
+      function handlePointerUp(pointerEvent: PointerEvent) {
+        finishTap(pointerEvent);
+      }
+
+      function handlePointerCancel() {
+        pendingSheetTapRef.current = null;
+        cleanup();
+      }
+
+      window.addEventListener("pointerup", handlePointerUp);
+      window.addEventListener("pointercancel", handlePointerCancel);
       return;
     }
 
@@ -2831,7 +2937,11 @@ export default function Home() {
   };
 
   return (
-    <main className="app-shell">
+    <main
+      className={`app-shell ${
+        selectedItem || activeToolSpec ? "has-mobile-selection" : ""
+      }`}
+    >
       <header className="topbar">
         <div className="brand">
           <span className="brand-mark" aria-hidden="true">
@@ -3675,31 +3785,46 @@ export default function Home() {
               />
             </button>
             {!collapsedPanels.tools && (
-              <div className="tool-grid">
-                {SHEET_TOOLS.map((tool) => (
+              <>
+                {activeToolSpec && (
                   <button
-                    key={tool.id}
                     type="button"
-                    draggable
-                    className={`tool-button tool-${tool.id} ${
-                      activeTool === tool.id ? "active" : ""
-                    }`}
-                    style={{ "--tool-color": tool.color } as CSSProperties}
-                    onClick={() => setActiveTool(tool.id)}
-                    onDragStart={(event) => {
-                      event.dataTransfer.effectAllowed = "copy";
-                      event.dataTransfer.setData("application/x-vocal-tool", tool.id);
-                    }}
-                    title={`${tool.name} ${tool.shortcut}`}
+                    className="tool-clear-button"
+                    onClick={clearActiveTool}
                   >
-                    <span className="tool-symbol">
-                      {renderToolGlyph(tool.id, tool.label)}
-                    </span>
-                    <span className="tool-name">{tool.name}</span>
-                    <kbd>{tool.shortcut}</kbd>
+                    <X size={16} />
+                    <span>記号選択を解除</span>
                   </button>
-                ))}
-              </div>
+                )}
+                <div className="tool-grid">
+                  {SHEET_TOOLS.map((tool) => (
+                    <button
+                      key={tool.id}
+                      type="button"
+                      draggable
+                      className={`tool-button tool-${tool.id} ${
+                        activeTool === tool.id ? "active" : ""
+                      }`}
+                      style={{ "--tool-color": tool.color } as CSSProperties}
+                      onClick={() => selectTool(tool.id)}
+                      onDragStart={(event) => {
+                        event.dataTransfer.effectAllowed = "copy";
+                        event.dataTransfer.setData(
+                          "application/x-vocal-tool",
+                          tool.id
+                        );
+                      }}
+                      title={`${tool.name} ${tool.shortcut}`}
+                    >
+                      <span className="tool-symbol">
+                        {renderToolGlyph(tool.id, tool.label)}
+                      </span>
+                      <span className="tool-name">{tool.name}</span>
+                      <kbd>{tool.shortcut}</kbd>
+                    </button>
+                  ))}
+                </div>
+              </>
             )}
           </section>
 
@@ -4179,6 +4304,44 @@ export default function Home() {
           </section>
         </aside>
       </div>
+
+      {(selectedItem || activeToolSpec) && (
+        <div
+          className={`mobile-selection-bar ${
+            selectedItem ? "" : "mobile-tool-bar"
+          }`}
+          aria-label={selectedItem ? "選択中の操作" : "記号選択中の操作"}
+        >
+          <div className="mobile-selection-summary">
+            <span>{selectedItem ? "選択中" : "配置待ち"}</span>
+            <strong>
+              {selectedItem
+                ? getItemDisplayLabel(selectedItem)
+                : activeToolSpec?.name}
+            </strong>
+          </div>
+          <button
+            type="button"
+            className="mobile-selection-clear"
+            onClick={selectedItem ? clearSelectionAndTool : clearActiveTool}
+          >
+            解除
+          </button>
+          {selectedItem && (
+            <button
+              type="button"
+              className="mobile-selection-delete"
+              onClick={() => {
+                removeSelected();
+                setActiveTool("");
+              }}
+            >
+              <Trash2 size={17} />
+              <span>削除</span>
+            </button>
+          )}
+        </div>
+      )}
     </main>
   );
 }
