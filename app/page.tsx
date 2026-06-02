@@ -273,7 +273,7 @@ const DEFAULT_AUTO_SCROLL_SETTINGS: AutoScrollSettings = {
   followAudio: true
 };
 
-const SHEET_TOOLS: ToolSpec[] = [
+const ALL_SHEET_TOOLS: ToolSpec[] = [
   {
     id: "lyric",
     name: "歌詞テキスト",
@@ -605,7 +605,11 @@ const DICTION_GROUPS = [
   }
 ];
 
-const TOOL_BY_ID = SHEET_TOOLS.reduce(
+const SHEET_TOOLS = ALL_SHEET_TOOLS.filter(
+  (tool) => !["lyric", "note"].includes(tool.id)
+);
+
+const TOOL_BY_ID = ALL_SHEET_TOOLS.reduce(
   (lookup, tool) => ({ ...lookup, [tool.id]: tool }),
   {} as Record<ToolId, ToolSpec>
 );
@@ -830,6 +834,38 @@ function getLyricPlacementY(
   const baseRatio = layoutMode === "staff" ? 0.86 : 0.8;
   const vowelOffset = layoutMode === "staff" ? 0.07 : 0.1;
   const laneRatio = toolId === "vowel" ? baseRatio + vowelOffset : baseRatio;
+  return system.top + system.height * laneRatio;
+}
+
+function getNearestLocalRowIndex(y: number) {
+  const exactIndex = SYSTEMS.findIndex(
+    (system) => y >= system.top && y <= system.top + system.height
+  );
+
+  if (exactIndex >= 0) {
+    return exactIndex;
+  }
+
+  return SYSTEMS.reduce(
+    (nearest, system, index) => {
+      const center = system.top + system.height / 2;
+      const distance = Math.abs(center - y);
+      return distance < nearest.distance ? { index, distance } : nearest;
+    },
+    { index: 0, distance: Number.POSITIVE_INFINITY }
+  ).index;
+}
+
+function getRowIndexForPageY(pageIndex: number, y: number) {
+  return (
+    clamp(pageIndex, 0, MAX_SHEET_PAGES - 1) * ROWS_PER_PAGE +
+    getNearestLocalRowIndex(y)
+  );
+}
+
+function getChordPlacementY(rowIndex: number, layoutMode: SheetLayoutMode) {
+  const system = getSystemForRow(rowIndex);
+  const laneRatio = layoutMode === "staff" ? 0.13 : 0.15;
   return system.top + system.height * laneRatio;
 }
 
@@ -1714,6 +1750,25 @@ export default function Home() {
     return rowMap;
   }, [sections]);
 
+  const sectionNameOptions = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...SECTION_PRESETS,
+          ...normalizedSections.map((section) => section.name)
+        ])
+      ).filter(Boolean),
+    [normalizedSections]
+  );
+
+  const selectedItemRowIndex = selectedItem
+    ? getItemGlobalRowIndex(selectedItem)
+    : -1;
+  const selectedItemSectionName =
+    selectedItemRowIndex >= 0
+      ? sectionByRow.get(selectedItemRowIndex)?.section.name ?? ""
+      : "";
+
   const sheetPageCount = useMemo(() => {
     const maxSectionRow = normalizedSections.reduce(
       (maxRow, section) => Math.max(maxRow, getSectionEndRow(section)),
@@ -1965,6 +2020,9 @@ export default function Home() {
       pageIndex = 0
     ) => {
       const tool = TOOL_BY_ID[toolId];
+      const itemPageIndex = getItemPageIndex({ pageIndex } as SheetItem);
+      const targetRowIndex =
+        toolId === "chord" ? getRowIndexForPageY(itemPageIndex, y) : -1;
       const explicitLabel = labelOverride?.trim();
       const label =
         toolId === "diction"
@@ -1978,8 +2036,11 @@ export default function Home() {
         toolId,
         label,
         x,
-        y,
-        pageIndex: getItemPageIndex({ pageIndex } as SheetItem),
+        y:
+          toolId === "chord"
+            ? getChordPlacementY(targetRowIndex, sheetLayoutMode)
+            : y,
+        pageIndex: itemPageIndex,
         size: tool.size,
         color: tool.color
       };
@@ -1988,7 +2049,7 @@ export default function Home() {
       setSelectedId(item.id);
       setStatus(`${tool.name}を追加`);
     },
-    [dictionMark, quickChord]
+    [dictionMark, quickChord, sheetLayoutMode]
   );
 
   const clearActiveTool = useCallback(() => {
@@ -3031,9 +3092,43 @@ export default function Home() {
     addItemAt(value, position.x, position.y, undefined, pageIndex);
   };
 
+  const addChordName = (chordName: string) => {
+    const label = chordName.trim() || "C";
+    const targetRowIndex =
+      selectedItemRowIndex >= 0 ? selectedItemRowIndex : 0;
+    const rowLyricItems = items
+      .filter(
+        (item) =>
+          isSheetLyricItem(item) &&
+          getItemGlobalRowIndex(item) === targetRowIndex
+      )
+      .slice()
+      .sort((a, b) => a.x - b.x);
+    const chordIndex =
+      items.filter(
+        (item) =>
+          item.toolId === "chord" &&
+          getItemGlobalRowIndex(item) === targetRowIndex
+      ).length % 4;
+    const targetX =
+      selectedItem && isSheetLyricItem(selectedItem)
+        ? selectedItem.x
+        : selectedItem?.toolId === "chord"
+          ? selectedItem.x
+          : rowLyricItems[0]?.x ?? 14 + chordIndex * 18;
+
+    addItemAt(
+      "chord",
+      clamp(targetX, 8, 92),
+      getChordPlacementY(targetRowIndex, sheetLayoutMode),
+      label,
+      getRowPageIndex(targetRowIndex)
+    );
+    setActiveTool("");
+  };
+
   const addQuickChord = () => {
-    const chordIndex = items.filter((item) => item.toolId === "chord").length % 4;
-    addItemAt("chord", 14 + chordIndex * 22, SYSTEMS[0].top + 1.2, quickChord);
+    addChordName(quickChord);
   };
 
   const importParsedMidi = (parsedMidi: ParsedMidi) => {
@@ -3091,7 +3186,6 @@ export default function Home() {
 
         const measurePosition = gridTick / ticksPerMeasure;
         const rowIndex = Math.floor(measurePosition / measuresPerRow);
-        const system = getSystemForRow(rowIndex);
         if (rowIndex >= MAX_SHEET_ROWS) {
           return;
         }
@@ -3111,7 +3205,7 @@ export default function Home() {
           toolId: "chord",
           label: chordName,
           x: clamp(10 + (80 * positionInRow) / measuresPerRow, 8, 92),
-          y: system.top + 1.35,
+          y: getChordPlacementY(rowIndex, sheetLayoutMode),
           pageIndex: getRowPageIndex(rowIndex),
           size: chordTool.size,
           color: chordTool.color
@@ -3362,6 +3456,52 @@ export default function Home() {
       ]);
     });
     setStatus(`${trimmedName}を設定`);
+  };
+
+  const updateRowSectionName = (rowIndex: number, nextName: string) => {
+    const trimmedName = nextName.trim();
+    if (rowIndex < 0 || !trimmedName) {
+      return;
+    }
+
+    setSections((current) => {
+      const normalizedCurrent = normalizeSections(current);
+      const existingExact = normalizedCurrent.find(
+        (section) =>
+          getSectionStartRow(section) === rowIndex &&
+          getSectionEndRow(section) === rowIndex
+      );
+      const coveringSection = normalizedCurrent.find(
+        (section) =>
+          rowIndex >= getSectionStartRow(section) &&
+          rowIndex <= getSectionEndRow(section)
+      );
+      const color =
+        existingExact?.color ??
+        coveringSection?.color ??
+        SECTION_COLORS[normalizedCurrent.length % SECTION_COLORS.length];
+      const nextSection: SectionEntry = {
+        id: existingExact?.id ?? createId(),
+        name: trimmedName,
+        rowIndex,
+        startRow: rowIndex,
+        endRow: rowIndex,
+        order: existingExact?.order ?? normalizedCurrent.length,
+        startMeasure:
+          existingExact?.startMeasure ?? coveringSection?.startMeasure ?? "",
+        recordingStartMeasure:
+          existingExact?.recordingStartMeasure ??
+          coveringSection?.recordingStartMeasure ??
+          "",
+        color
+      };
+
+      return normalizeSections([
+        ...normalizedCurrent.filter((section) => section.id !== existingExact?.id),
+        nextSection
+      ]);
+    });
+    setStatus(`この段を${trimmedName}に変更しました`);
   };
 
   const removeSection = (sectionId: string) => {
@@ -4414,11 +4554,7 @@ export default function Home() {
                     const rowIndex = pageIndex * ROWS_PER_PAGE + systemIndex;
                     const sectionSlot = sectionByRow.get(rowIndex);
                     const sectionLabel = sectionSlot
-                      ? `${sectionSlot.section.name}${
-                          sectionSlot.rowTotal > 1
-                            ? ` ${sectionSlot.rowPart}/${sectionSlot.rowTotal}`
-                            : ""
-                        }`
+                      ? sectionSlot.section.name
                       : `${rowIndex + 1}`;
                     const measureLabel = sectionSlot
                       ? [
@@ -4705,6 +4841,10 @@ export default function Home() {
                       type="button"
                       onClick={() => {
                         setQuickChord(chord);
+                        if (selectedItem) {
+                          addChordName(chord);
+                          return;
+                        }
                         setActiveTool("chord");
                         setStatus(`${chord}を入力`);
                       }}
@@ -5003,6 +5143,29 @@ export default function Home() {
                     updateItemLabel(selectedItem.id, event.target.value)
                   }
                 />
+
+                <div className="section-row-tools">
+                  <label className="field-label" htmlFor="selectedRowSection">
+                    この段のセクション
+                  </label>
+                  <select
+                    id="selectedRowSection"
+                    value={selectedItemSectionName}
+                    onChange={(event) =>
+                      updateRowSectionName(
+                        selectedItemRowIndex,
+                        event.target.value
+                      )
+                    }
+                  >
+                    <option value="">未設定</option>
+                    {sectionNameOptions.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
                 <label className="field-label" htmlFor="itemSize">
                   サイズ
