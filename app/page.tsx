@@ -66,9 +66,23 @@ type ToolId =
   | "edge"
   | "dynamic"
   | "marker"
-  | "note";
+  | "note"
+  // トップライン（作曲用）ツール
+  | "harmony"
+  | "harmony_fu"
+  | "harmony_lyric"
+  | "double"
+  | "double_phrase"
+  | "double_word"
+  | "topline_unison"
+  | "topline_oct_up"
+  | "topline_oct_down"
+  | "topline_effect"
+  | "topline_marker";
 
 type ToolKind = "text" | "symbol" | "chord" | "note";
+
+type ToolCategory = "vocal" | "topline";
 
 type ToolSpec = {
   id: ToolId;
@@ -78,6 +92,7 @@ type ToolSpec = {
   color: string;
   size: number;
   kind: ToolKind;
+  category?: ToolCategory; // 省略時は "vocal"
 };
 
 type SheetItem = {
@@ -155,7 +170,7 @@ type SectionEntry = {
   color: string;
 };
 
-type LyricDisplayMode = "original" | "reading" | "vowel";
+type LyricDisplayMode = "original" | "reading" | "vowel" | "topline";
 
 type SheetLayoutMode = "lyricCard" | "staff";
 
@@ -427,6 +442,117 @@ const ALL_SHEET_TOOLS: ToolSpec[] = [
     color: "#fb923c",
     size: 18,
     kind: "text"
+  },
+  // ── トップライン（作曲用）ツール ──
+  {
+    id: "harmony",
+    name: "ハモリ",
+    label: "ハモ",
+    shortcut: "1",
+    color: "#2563eb",
+    size: 18,
+    kind: "symbol",
+    category: "topline"
+  },
+  {
+    id: "harmony_fu",
+    name: "Fuハモ",
+    label: "Fu♬",
+    shortcut: "2",
+    color: "#60a5fa",
+    size: 18,
+    kind: "text",
+    category: "topline"
+  },
+  {
+    id: "harmony_lyric",
+    name: "歌ハモ",
+    label: "歌♬",
+    shortcut: "3",
+    color: "#3b82f6",
+    size: 18,
+    kind: "text",
+    category: "topline"
+  },
+  {
+    id: "double",
+    name: "ダブリング",
+    label: "DBL",
+    shortcut: "4",
+    color: "#7c3aed",
+    size: 18,
+    kind: "text",
+    category: "topline"
+  },
+  {
+    id: "double_phrase",
+    name: "フレーズDBL",
+    label: "P-DBL",
+    shortcut: "5",
+    color: "#9333ea",
+    size: 18,
+    kind: "text",
+    category: "topline"
+  },
+  {
+    id: "double_word",
+    name: "ワードDBL",
+    label: "W-DBL",
+    shortcut: "6",
+    color: "#a855f7",
+    size: 18,
+    kind: "text",
+    category: "topline"
+  },
+  {
+    id: "topline_unison",
+    name: "ユニゾン",
+    label: "UNI",
+    shortcut: "7",
+    color: "#0891b2",
+    size: 18,
+    kind: "text",
+    category: "topline"
+  },
+  {
+    id: "topline_oct_up",
+    name: "オク上",
+    label: "+8va",
+    shortcut: "8",
+    color: "#059669",
+    size: 18,
+    kind: "text",
+    category: "topline"
+  },
+  {
+    id: "topline_oct_down",
+    name: "オク下",
+    label: "-8va",
+    shortcut: "9",
+    color: "#16a34a",
+    size: 18,
+    kind: "text",
+    category: "topline"
+  },
+  {
+    id: "topline_effect",
+    name: "エフェクト",
+    label: "FX",
+    shortcut: "0",
+    color: "#dc2626",
+    size: 18,
+    kind: "text",
+    category: "topline"
+  },
+  {
+    id: "topline_marker",
+    name: "メモ（作曲）",
+    label: "★",
+    shortcut: "-",
+    color: "#f59e0b",
+    size: 18,
+    kind: "text",
+    category: "topline"
   }
 ];
 
@@ -616,8 +742,16 @@ const DICTION_GROUPS = [
   }
 ];
 
+// ボーカル用ツール（従来どおり）
 const SHEET_TOOLS = ALL_SHEET_TOOLS.filter(
-  (tool) => !["lyric", "note"].includes(tool.id)
+  (tool) =>
+    !["lyric", "note"].includes(tool.id) &&
+    (tool.category ?? "vocal") === "vocal"
+);
+
+// トップライン（作曲）用ツール
+const TOPLINE_TOOLS = ALL_SHEET_TOOLS.filter(
+  (tool) => tool.category === "topline"
 );
 
 const TOOL_BY_ID = ALL_SHEET_TOOLS.reduce(
@@ -1660,6 +1794,7 @@ export default function Home() {
   const [items, setItems] = useState<SheetItem[]>([]);
   const [activeTool, setActiveTool] = useState<ToolId | "">("");
   const [activeHighlightColor, setActiveHighlightColor] = useState<string>("");
+  const [toolPanelCategory, setToolPanelCategory] = useState<ToolCategory>("vocal");
   const [selectedId, setSelectedId] = useState<string>("");
   const [editingItemId, setEditingItemId] = useState<string>("");
   const [dragging, setDragging] = useState<{
@@ -4743,13 +4878,24 @@ export default function Home() {
               {[
                 ["original", "原文"],
                 ["reading", "ひらがな"],
-                ["vowel", "母音"]
+                ["vowel", "母音"],
+                ["topline", "トップライン"]
               ].map(([mode, label]) => (
                 <button
                   key={mode}
                   type="button"
-                  className={lyricDisplayMode === mode ? "active" : ""}
-                  onClick={() => setLyricDisplayMode(mode as LyricDisplayMode)}
+                  className={`${lyricDisplayMode === mode ? "active" : ""} ${
+                    mode === "topline" ? "topline-mode-btn" : ""
+                  }`}
+                  onClick={() => {
+                    setLyricDisplayMode(mode as LyricDisplayMode);
+                    // トップラインモード時はツールパネルも切り替え
+                    if (mode === "topline") {
+                      setToolPanelCategory("topline");
+                    } else if (toolPanelCategory === "topline") {
+                      setToolPanelCategory("vocal");
+                    }
+                  }}
                 >
                   {label}
                 </button>
@@ -5037,8 +5183,34 @@ export default function Home() {
                     <span>選択を解除</span>
                   </button>
                 )}
+                {/* ボーカル用 / トップライン用 切り替えタブ */}
+                <div className="segmented-control tool-category-control">
+                  <button
+                    type="button"
+                    className={toolPanelCategory === "vocal" ? "active" : ""}
+                    onClick={() => {
+                      setToolPanelCategory("vocal");
+                      if (lyricDisplayMode === "topline") {
+                        setLyricDisplayMode("original");
+                      }
+                    }}
+                  >
+                    ボーカル用
+                  </button>
+                  <button
+                    type="button"
+                    className={toolPanelCategory === "topline" ? "active" : ""}
+                    onClick={() => {
+                      setToolPanelCategory("topline");
+                      setLyricDisplayMode("topline");
+                    }}
+                  >
+                    トップライン
+                  </button>
+                </div>
+
                 <div className="tool-grid">
-                  {SHEET_TOOLS.map((tool) => (
+                  {(toolPanelCategory === "topline" ? TOPLINE_TOOLS : SHEET_TOOLS).map((tool) => (
                     <button
                       key={tool.id}
                       type="button"

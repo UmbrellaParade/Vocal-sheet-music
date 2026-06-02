@@ -870,6 +870,29 @@ kbd {
   grid-template-columns: repeat(2, minmax(86px, 1fr));
 }
 
+/* 原文/ひらがな/母音/トップライン の4ボタン */
+.segmented-control:has(.topline-mode-btn) {
+  grid-template-columns: repeat(4, minmax(60px, 1fr));
+}
+
+/* トップラインボタンはアクセント色を変える */
+.topline-mode-btn.active {
+  background: #7c3aed !important;
+  box-shadow: 0 4px 12px rgba(124, 58, 237, 0.25) !important;
+}
+
+/* ツールカテゴリ切り替えタブ */
+.tool-category-control {
+  grid-template-columns: repeat(2, 1fr);
+  width: 100%;
+  margin-bottom: 10px;
+}
+
+.tool-category-control button.active:last-child {
+  background: #7c3aed;
+  box-shadow: 0 4px 12px rgba(124, 58, 237, 0.25);
+}
+
 .segmented-control button {
   min-height: 30px;
   padding: 0 10px;
