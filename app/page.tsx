@@ -63,6 +63,7 @@ type ToolId =
   | "hold"
   | "crescendo"
   | "decrescendo"
+  | "edge"
   | "dynamic"
   | "marker"
   | "note";
@@ -397,6 +398,15 @@ const ALL_SHEET_TOOLS: ToolSpec[] = [
     label: ">",
     shortcut: "E",
     color: "#334155",
+    size: 18,
+    kind: "symbol"
+  },
+  {
+    id: "edge",
+    name: "エッジボイス",
+    label: "エッジ",
+    shortcut: "G",
+    color: "#7c3aed",
     size: 18,
     kind: "symbol"
   },
