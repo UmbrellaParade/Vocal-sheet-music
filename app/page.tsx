@@ -3062,6 +3062,62 @@ export default function Home() {
     setStatus("譜面を空にしました");
   }, []);
 
+  // 行単位の歌詞アイテムを1文字ずつに分割して置き換える（マーキング・選択を文字単位にする）
+  const splitLyricItemsIntoChars = useCallback(() => {
+    setItems((current) => {
+      const nextItems: SheetItem[] = [];
+
+      for (const item of current) {
+        // 行全体アイテム（width あり）の歌詞だけ分割対象
+        const isFullLine =
+          item.toolId === "lyric" &&
+          item.width != null &&
+          item.width > 0;
+
+        if (!isFullLine) {
+          nextItems.push(item);
+          continue;
+        }
+
+        const srcText = item.originalLabel ?? item.label;
+        const chars = [...srcText].filter((ch) => ch.trim().length > 0);
+
+        if (chars.length <= 1) {
+          // 1文字以下はそのまま（widthだけ除去）
+          nextItems.push({ ...item, width: undefined, align: undefined });
+          continue;
+        }
+
+        // 文字ごとに均等配置
+        chars.forEach((char, ci) => {
+          const x =
+            LYRIC_LINE_X + LYRIC_LINE_WIDTH * (ci + 0.5) / chars.length;
+          const readingLabel = roughHiragana(char, []);
+          const vowelLabel = toVowels(readingLabel);
+
+          nextItems.push({
+            ...item,
+            id: createId(),
+            label: char,
+            originalLabel: char,
+            readingLabel,
+            vowelLabel,
+            x,
+            width: undefined,
+            align: undefined,
+            // ハイライト色・コメントは先頭文字のみ引き継ぐ（他は解除）
+            highlightColor: ci === 0 ? item.highlightColor : undefined,
+            comment: ci === 0 ? item.comment : undefined
+          });
+        });
+      }
+
+      return nextItems;
+    });
+    setSelectedId("");
+    setStatus("歌詞を1文字ずつに分割しました");
+  }, []);
+
   const newDraft = useCallback(() => {
     if (!window.confirm("新しい譜面を作りますか？")) {
       return;
@@ -5833,10 +5889,21 @@ export default function Home() {
               />
             </button>
             {!collapsedPanels.cleanup && (
-              <button type="button" className="wide-button neutral" onClick={resetSheet}>
-                <Eraser size={16} />
-                <span>譜面を空にする</span>
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="wide-button"
+                  onClick={splitLyricItemsIntoChars}
+                  title="行単位の歌詞を1文字ずつに分割してマーキングを文字単位にする"
+                >
+                  <Type size={16} />
+                  <span>歌詞を1文字ずつに分割</span>
+                </button>
+                <button type="button" className="wide-button neutral" onClick={resetSheet}>
+                  <Eraser size={16} />
+                  <span>譜面を空にする</span>
+                </button>
+              </>
             )}
           </section>
         </aside>
