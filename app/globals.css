@@ -352,6 +352,10 @@ button:focus-visible {
   min-height: 118px;
 }
 
+.reading-lyrics-textarea {
+  min-height: 280px;
+}
+
 .lyric-panel .button-row {
   gap: 10px;
   margin-top: 12px;

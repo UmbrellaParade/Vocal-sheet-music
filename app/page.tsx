@@ -3991,10 +3991,10 @@ export default function Home() {
                 </label>
                 <textarea
                   id="readingLyrics"
-                  className="lyrics-textarea"
+                  className="lyrics-textarea reading-lyrics-textarea"
                   value={readingLyrics}
                   onChange={(event) => setReadingLyrics(event.target.value)}
-                  rows={5}
+                  rows={12}
                 />
                 <button
                   type="button"
