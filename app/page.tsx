@@ -869,6 +869,13 @@ function getChordPlacementY(rowIndex: number, layoutMode: SheetLayoutMode) {
   return system.top + system.height * laneRatio;
 }
 
+// 記号を行の垂直中央にスナップするY座標を返す
+function getSymbolSnapY(pageIndex: number, y: number) {
+  const rowIndex = getRowIndexForPageY(pageIndex, y);
+  const system = getSystemForRow(rowIndex);
+  return system.top + system.height * 0.5;
+}
+
 function normalizeSectionHeadingText(value: string) {
   return normalizeFullWidthAlnum(value)
     .trim()
@@ -1886,9 +1893,11 @@ export default function Home() {
 
       const fallback = lyricDisplayFallbacks.get(item.id);
       const originalLabel = item.originalLabel ?? fallback?.original ?? item.label;
+      // readingLyrics テキスト（ユーザーが直接編集・保存できる）を優先し、
+      // 配置時に生成した readingLabel はフォールバックとして使う
       const readingLabel =
-        item.readingLabel ??
         fallback?.reading ??
+        item.readingLabel ??
         roughHiragana(originalLabel, readingCorrectionEntries);
       const vowelLabel = item.vowelLabel ?? fallback?.vowel ?? toVowels(readingLabel);
 
@@ -2039,7 +2048,9 @@ export default function Home() {
         y:
           toolId === "chord"
             ? getChordPlacementY(targetRowIndex, sheetLayoutMode)
-            : y,
+            : tool.kind === "symbol"
+              ? getSymbolSnapY(itemPageIndex, y)
+              : y,
         pageIndex: itemPageIndex,
         size: tool.size,
         color: tool.color
