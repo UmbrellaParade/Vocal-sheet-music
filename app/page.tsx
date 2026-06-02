@@ -132,6 +132,16 @@ type SavedSong = {
   draft: DraftData;
 };
 
+type SavedLyric = {
+  id: string;
+  title: string;
+  updatedAt: string;
+  sourceLyrics: string;
+  readingLyrics: string;
+  readingCorrections: string;
+  vowelLyrics: string;
+};
+
 type SectionEntry = {
   id: string;
   name: string;
@@ -238,6 +248,7 @@ type PanelId =
 
 const STORAGE_KEY = "vocal-sheet-music:draft:v1";
 const SONG_LIBRARY_STORAGE_KEY = "vocal-sheet-music:songs:v1";
+const LYRIC_LIBRARY_STORAGE_KEY = "vocal-sheet-music:lyrics:v1";
 
 const APP_BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 const KUROMOJI_DICT_PATH = `${APP_BASE_PATH}/kuromoji/`;
@@ -631,6 +642,20 @@ function formatSavedSongDate(value: string) {
     hour: "2-digit",
     minute: "2-digit"
   });
+}
+
+function getSavedLyricTitle(meta: SheetMeta, sourceLyrics: string) {
+  const metaTitle = meta.title.trim();
+  if (metaTitle && metaTitle !== DEFAULT_META.title) {
+    return metaTitle;
+  }
+
+  const firstLine = sourceLyrics
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean);
+
+  return firstLine ? firstLine.slice(0, 28) : "無題の歌詞";
 }
 
 function parsePositiveNumber(value: string, fallback: number) {
@@ -1595,6 +1620,8 @@ export default function Home() {
   const [sunoText, setSunoText] = useState("");
   const [savedSongs, setSavedSongs] = useState<SavedSong[]>([]);
   const [songLibrarySelectionId, setSongLibrarySelectionId] = useState("");
+  const [savedLyrics, setSavedLyrics] = useState<SavedLyric[]>([]);
+  const [lyricLibrarySelectionId, setLyricLibrarySelectionId] = useState("");
   const [autoScrollSettings, setAutoScrollSettings] =
     useState<AutoScrollSettings>(DEFAULT_AUTO_SCROLL_SETTINGS);
   const [isAutoScrolling, setIsAutoScrolling] = useState(false);
@@ -2116,6 +2143,93 @@ export default function Home() {
     [persistSavedSongs, savedSongs]
   );
 
+  const persistSavedLyrics = useCallback((lyrics: SavedLyric[]) => {
+    setSavedLyrics(lyrics);
+    localStorage.setItem(LYRIC_LIBRARY_STORAGE_KEY, JSON.stringify(lyrics));
+  }, []);
+
+  const saveCurrentLyricsToLibrary = useCallback(() => {
+    if (
+      !sourceLyrics.trim() &&
+      !readingLyrics.trim() &&
+      !vowelLyrics.trim()
+    ) {
+      setStatus("保存する歌詞がありません");
+      return;
+    }
+
+    const title = getSavedLyricTitle(meta, sourceLyrics);
+    const existingLyric =
+      savedLyrics.find((lyric) => lyric.id === lyricLibrarySelectionId) ??
+      savedLyrics.find((lyric) => lyric.title === title);
+    const lyricId = existingLyric?.id ?? createId();
+    const nextLyric: SavedLyric = {
+      id: lyricId,
+      title,
+      updatedAt: new Date().toISOString(),
+      sourceLyrics,
+      readingLyrics,
+      readingCorrections,
+      vowelLyrics
+    };
+    const nextLyrics = [
+      nextLyric,
+      ...savedLyrics.filter((lyric) => lyric.id !== lyricId)
+    ].slice(0, 120);
+
+    persistSavedLyrics(nextLyrics);
+    setLyricLibrarySelectionId(lyricId);
+    setStatus(`${title}を歌詞保存しました`);
+  }, [
+    lyricLibrarySelectionId,
+    meta,
+    persistSavedLyrics,
+    readingCorrections,
+    readingLyrics,
+    savedLyrics,
+    sourceLyrics,
+    vowelLyrics
+  ]);
+
+  const loadLyricsFromLibrary = useCallback(
+    (lyricId: string) => {
+      const lyric = savedLyrics.find((candidate) => candidate.id === lyricId);
+      if (!lyric) {
+        setStatus("読み込む歌詞を選んでください");
+        return;
+      }
+
+      setSourceLyrics(lyric.sourceLyrics);
+      setReadingLyrics(lyric.readingLyrics);
+      setReadingCorrections(lyric.readingCorrections);
+      setVowelLyrics(lyric.vowelLyrics);
+      setLyricLibrarySelectionId(lyric.id);
+      setStatus(`${lyric.title}の歌詞を読み込みました`);
+    },
+    [savedLyrics]
+  );
+
+  const deleteLyricsFromLibrary = useCallback(
+    (lyricId: string) => {
+      const lyric = savedLyrics.find((candidate) => candidate.id === lyricId);
+      if (!lyric) {
+        return;
+      }
+
+      if (!window.confirm(`${lyric.title}を歌詞保存から削除しますか？`)) {
+        return;
+      }
+
+      const nextLyrics = savedLyrics.filter(
+        (candidate) => candidate.id !== lyricId
+      );
+      persistSavedLyrics(nextLyrics);
+      setLyricLibrarySelectionId(nextLyrics[0]?.id ?? "");
+      setStatus(`${lyric.title}の歌詞を削除しました`);
+    },
+    [persistSavedLyrics, savedLyrics]
+  );
+
   const updateItem = useCallback((id: string, patch: Partial<SheetItem>) => {
     setItems((current) =>
       current.map((item) => (item.id === id ? { ...item, ...patch } : item))
@@ -2564,6 +2678,38 @@ export default function Home() {
       }
     } catch {
       // Keep the app usable if old library data is malformed.
+    }
+  }, []);
+
+  useEffect(() => {
+    const raw = localStorage.getItem(LYRIC_LIBRARY_STORAGE_KEY);
+    if (!raw) {
+      return;
+    }
+
+    try {
+      const lyrics = JSON.parse(raw) as SavedLyric[];
+      if (Array.isArray(lyrics)) {
+        setSavedLyrics(
+          lyrics
+            .filter((lyric) => lyric?.id)
+            .map((lyric) => ({
+              id: lyric.id,
+              title: lyric.title || "無題の歌詞",
+              updatedAt: lyric.updatedAt || new Date(0).toISOString(),
+              sourceLyrics: lyric.sourceLyrics ?? "",
+              readingLyrics: lyric.readingLyrics ?? "",
+              readingCorrections: lyric.readingCorrections ?? "",
+              vowelLyrics: lyric.vowelLyrics ?? ""
+            }))
+            .sort(
+              (a, b) =>
+                new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+            )
+        );
+      }
+    } catch {
+      // Keep the app usable if old lyric library data is malformed.
     }
   }, []);
 
@@ -3497,6 +3643,59 @@ export default function Home() {
             </button>
             {!collapsedPanels.lyrics && (
               <>
+                <label className="field-label" htmlFor="lyricLibrarySelect">
+                  保存した歌詞
+                </label>
+                <select
+                  id="lyricLibrarySelect"
+                  value={lyricLibrarySelectionId}
+                  onChange={(event) => setLyricLibrarySelectionId(event.target.value)}
+                >
+                  <option value="">歌詞を選択</option>
+                  {savedLyrics.map((lyric) => (
+                    <option key={lyric.id} value={lyric.id}>
+                      {lyric.title}
+                    </option>
+                  ))}
+                </select>
+                <div className="button-row">
+                  <button
+                    type="button"
+                    className="control-button"
+                    onClick={saveCurrentLyricsToLibrary}
+                  >
+                    <Save size={16} />
+                    <span>保存</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="control-button"
+                    onClick={() => loadLyricsFromLibrary(lyricLibrarySelectionId)}
+                    disabled={!lyricLibrarySelectionId}
+                  >
+                    <FolderOpen size={16} />
+                    <span>読込</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="control-button danger"
+                    onClick={() => deleteLyricsFromLibrary(lyricLibrarySelectionId)}
+                    disabled={!lyricLibrarySelectionId}
+                  >
+                    <Trash2 size={16} />
+                    <span>削除</span>
+                  </button>
+                </div>
+                <p className="song-library-status">
+                  {savedLyrics.length > 0
+                    ? `${savedLyrics.length}件保存済み${
+                        savedLyrics[0]?.updatedAt
+                          ? ` / 最新 ${formatSavedSongDate(savedLyrics[0].updatedAt)}`
+                          : ""
+                      }`
+                    : "まだ保存した歌詞はありません"}
+                </p>
+
                 <label className="field-label" htmlFor="sourceLyrics">
                   原文
                 </label>
