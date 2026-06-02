@@ -2562,27 +2562,65 @@ export default function Home() {
       const placedItems: SheetItem[] = [];
       let variantIndex = 0;
 
-      const createPlacedTextItem = (line: string, rowIndex: number): SheetItem => {
+      // 1行分のアイテムを生成（スペース区切りなら単語ごとに分割）
+      const createPlacedLineItems = (line: string, rowIndex: number): SheetItem[] => {
         const system = getSystemForRow(rowIndex);
         const variant = variants[variantIndex] ?? {};
         variantIndex += 1;
-        const label = toolId === "lyric" ? variant.original ?? line : line;
+        const yPos = getLyricPlacementY(system, toolId, sheetLayoutMode);
+        const pageIdx = getRowPageIndex(rowIndex);
 
-        return {
-          id: createId(),
-          toolId,
-          label,
-          originalLabel: toolId === "lyric" ? label : undefined,
-          readingLabel: toolId === "lyric" ? variant.reading : undefined,
-          vowelLabel: toolId === "lyric" ? variant.vowel : undefined,
-          x: LYRIC_LINE_X,
-          y: getLyricPlacementY(system, toolId, sheetLayoutMode),
-          pageIndex: getRowPageIndex(rowIndex),
-          size: tool.size,
-          color: tool.color,
-          width: LYRIC_LINE_WIDTH,
-          align: "left"
-        };
+        const words = line.split(/[ 　]+/).filter(Boolean);
+
+        if (words.length <= 1) {
+          // スペースなし → 1アイテム（従来どおり行全体）
+          const label = toolId === "lyric" ? variant.original ?? line : line;
+          return [{
+            id: createId(),
+            toolId,
+            label,
+            originalLabel: toolId === "lyric" ? label : undefined,
+            readingLabel: toolId === "lyric" ? variant.reading : undefined,
+            vowelLabel: toolId === "lyric" ? variant.vowel : undefined,
+            x: LYRIC_LINE_X,
+            y: yPos,
+            pageIndex: pageIdx,
+            size: tool.size,
+            color: tool.color,
+            width: LYRIC_LINE_WIDTH,
+            align: "left"
+          }];
+        }
+
+        // スペースあり → 単語ごとに分割して横並び配置
+        const origWords = (variant.original ?? line).split(/[ 　]+/).filter(Boolean);
+        const readingWords = (variant.reading ?? "").split(/[ 　]+/).filter(Boolean);
+        const vowelWords = (variant.vowel ?? "").split(/[ 　]+/).filter(Boolean);
+        const totalChars = words.reduce((sum, w) => sum + w.length, 0) || 1;
+        let charsSoFar = 0;
+
+        return words.map((word, wi) => {
+          // 文字数に比例した中心X座標
+          const x = LYRIC_LINE_X +
+            LYRIC_LINE_WIDTH * (charsSoFar + word.length / 2) / totalChars;
+          charsSoFar += word.length;
+          const label = toolId === "lyric" ? (origWords[wi] ?? word) : word;
+
+          return {
+            id: createId(),
+            toolId,
+            label,
+            originalLabel: toolId === "lyric" ? label : undefined,
+            readingLabel: toolId === "lyric" ? (readingWords[wi] || undefined) : undefined,
+            vowelLabel: toolId === "lyric" ? (vowelWords[wi] || undefined) : undefined,
+            x,
+            y: yPos,
+            pageIndex: pageIdx,
+            size: tool.size,
+            color: tool.color
+            // width なし → 中央揃えで単語サイズに自動フィット
+          };
+        });
       };
 
       if (sectionBlocks.length > 0) {
@@ -2599,7 +2637,7 @@ export default function Home() {
           const endRow = getSectionEndRow(section);
           block.lines.slice(0, endRow - startRow + 1).forEach((line, lineIndex) => {
             const rowIndex = startRow + lineIndex;
-            placedItems.push(createPlacedTextItem(line, rowIndex));
+            placedItems.push(...createPlacedLineItems(line, rowIndex));
           });
         });
 
@@ -2629,7 +2667,7 @@ export default function Home() {
       }
 
       lines.slice(0, MAX_SHEET_ROWS).forEach((line, rowIndex) => {
-        placedItems.push(createPlacedTextItem(line, rowIndex));
+        placedItems.push(...createPlacedLineItems(line, rowIndex));
       });
 
       setItems((current) => [...current, ...placedItems]);
@@ -4860,24 +4898,19 @@ export default function Home() {
                         style={itemStyle}
                         onPointerDown={(event) => handleItemPointerDown(event, item)}
                         onDoubleClick={() => {
-                          if (isEditableSheetText) {
-                            startInlineEdit(item.id);
-                            return;
-                          }
-
-                          const nextLabel = window.prompt(
-                            "表示",
-                            getEditableItemLabel(item)
-                          );
-                          if (nextLabel !== null) {
-                            updateItemLabel(item.id, nextLabel);
+                          // 歌詞・母音は歌唱譜上での編集を無効化
+                          // （左パネルの読み欄で修正してください）
+                          if (!isEditableSheetText) {
+                            const nextLabel = window.prompt(
+                              "表示",
+                              getEditableItemLabel(item)
+                            );
+                            if (nextLabel !== null) {
+                              updateItemLabel(item.id, nextLabel);
+                            }
                           }
                         }}
-                        title={
-                          isEditableSheetText
-                            ? `${tool.name}: ダブルクリックで編集`
-                            : tool.name
-                        }
+                        title={tool.name}
                       >
                         <span className="item-content">
                           {renderToolGlyph(item.toolId, displayLabel)}
