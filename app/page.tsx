@@ -83,6 +83,9 @@ type SheetItem = {
   id: string;
   toolId: ToolId;
   label: string;
+  originalLabel?: string;
+  readingLabel?: string;
+  vowelLabel?: string;
   x: number;
   y: number;
   pageIndex?: number;
@@ -121,6 +124,14 @@ type DraftData = {
   midiMeasuresPerRow?: string;
 };
 
+type SavedSong = {
+  id: string;
+  title: string;
+  vocalist?: string;
+  updatedAt: string;
+  draft: DraftData;
+};
+
 type SectionEntry = {
   id: string;
   name: string;
@@ -152,6 +163,12 @@ type LyricSectionBlock = {
   label: string;
   originalHeading: string;
   lines: string[];
+};
+
+type LyricLineVariant = {
+  original?: string;
+  reading?: string;
+  vowel?: string;
 };
 
 type ReadingResult = {
@@ -210,6 +227,7 @@ type PanelId =
   | "lyrics"
   | "suno"
   | "audio"
+  | "library"
   | "midi"
   | "scroll"
   | "share"
@@ -219,6 +237,7 @@ type PanelId =
   | "cleanup";
 
 const STORAGE_KEY = "vocal-sheet-music:draft:v1";
+const SONG_LIBRARY_STORAGE_KEY = "vocal-sheet-music:songs:v1";
 
 const APP_BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 const KUROMOJI_DICT_PATH = `${APP_BASE_PATH}/kuromoji/`;
@@ -598,6 +617,20 @@ function formatTime(seconds: number) {
     .toString()
     .padStart(2, "0");
   return `${minutes}:${remainingSeconds}`;
+}
+
+function formatSavedSongDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  return date.toLocaleString("ja-JP", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
 }
 
 function parsePositiveNumber(value: string, fallback: number) {
@@ -1004,6 +1037,15 @@ function parseSectionedLyrics(input: string) {
   }
 
   return foundHeading ? blocks.filter((block) => block.lines.length > 0) : [];
+}
+
+function flattenLyricLines(input: string) {
+  const blocks = parseSectionedLyrics(input);
+  if (blocks.length > 0) {
+    return blocks.flatMap((block) => block.lines);
+  }
+
+  return splitLinesForPlacement(input);
 }
 
 function convertSectionedTextToVowels(input: string) {
@@ -1551,6 +1593,8 @@ export default function Home() {
   const [shareUrl, setShareUrl] = useState("");
   const [shareQrCode, setShareQrCode] = useState("");
   const [sunoText, setSunoText] = useState("");
+  const [savedSongs, setSavedSongs] = useState<SavedSong[]>([]);
+  const [songLibrarySelectionId, setSongLibrarySelectionId] = useState("");
   const [autoScrollSettings, setAutoScrollSettings] =
     useState<AutoScrollSettings>(DEFAULT_AUTO_SCROLL_SETTINGS);
   const [isAutoScrolling, setIsAutoScrolling] = useState(false);
@@ -1571,6 +1615,7 @@ export default function Home() {
     midi: false,
     scroll: false,
     share: false,
+    library: false,
     tools: false,
     settings: false,
     inspector: false,
@@ -1586,6 +1631,33 @@ export default function Home() {
     () => parseReadingCorrections(readingCorrections),
     [readingCorrections]
   );
+
+  const lyricDisplayFallbacks = useMemo(() => {
+    const originalLines = flattenLyricLines(sourceLyrics);
+    const readingLines = flattenLyricLines(readingLyrics);
+    const vowelLines = flattenLyricLines(vowelLyrics);
+    const lyricItems = items
+      .filter((item) => item.toolId === "lyric")
+      .slice()
+      .sort(
+        (a, b) =>
+          getItemGlobalRowIndex(a) - getItemGlobalRowIndex(b) || a.x - b.x
+      );
+    const fallbackMap = new Map<
+      string,
+      { original?: string; reading?: string; vowel?: string }
+    >();
+
+    lyricItems.forEach((item, index) => {
+      fallbackMap.set(item.id, {
+        original: originalLines[index],
+        reading: readingLines[index],
+        vowel: vowelLines[index]
+      });
+    });
+
+    return fallbackMap;
+  }, [items, readingLyrics, sourceLyrics, vowelLyrics]);
 
   const normalizedSections = useMemo(() => normalizeSections(sections), [sections]);
 
@@ -1730,17 +1802,25 @@ export default function Home() {
         return item.label;
       }
 
+      const fallback = lyricDisplayFallbacks.get(item.id);
+      const originalLabel = item.originalLabel ?? fallback?.original ?? item.label;
+      const readingLabel =
+        item.readingLabel ??
+        fallback?.reading ??
+        roughHiragana(originalLabel, readingCorrectionEntries);
+      const vowelLabel = item.vowelLabel ?? fallback?.vowel ?? toVowels(readingLabel);
+
       if (lyricDisplayMode === "reading") {
-        return roughHiragana(item.label, readingCorrectionEntries);
+        return readingLabel;
       }
 
       if (lyricDisplayMode === "vowel") {
-        return toVowels(roughHiragana(item.label, readingCorrectionEntries));
+        return vowelLabel;
       }
 
-      return item.label;
+      return originalLabel;
     },
-    [lyricDisplayMode, readingCorrectionEntries]
+    [lyricDisplayFallbacks, lyricDisplayMode, readingCorrectionEntries]
   );
 
   const replaceAudioSource = useCallback((blob: Blob, name: string) => {
@@ -1816,12 +1896,20 @@ export default function Home() {
     }
 
     const scrollDistance = scoreStage.scrollHeight - scoreStage.clientHeight;
-    if (scrollDistance <= 0) {
+    const nextProgress = clamp(progress, 0, 1);
+    if (scrollDistance > 0) {
+      scoreStage.scrollTo({
+        top: scrollDistance * nextProgress,
+        behavior: "auto"
+      });
       return;
     }
 
-    scoreStage.scrollTo({
-      top: scrollDistance * clamp(progress, 0, 1),
+    const rect = scoreStage.getBoundingClientRect();
+    const stageTop = window.scrollY + rect.top;
+    const pageDistance = Math.max(scoreStage.scrollHeight - window.innerHeight, 0);
+    window.scrollTo({
+      top: stageTop + pageDistance * nextProgress,
       behavior: "auto"
     });
   }, []);
@@ -1940,6 +2028,7 @@ export default function Home() {
     setAutoScrollElapsed(0);
     setSelectedId("");
     setEditingItemId("");
+    setSongLibrarySelectionId("");
   }, []);
 
   const saveDraft = useCallback(() => {
@@ -1958,11 +2047,121 @@ export default function Home() {
     setStatus("復元しました");
   }, [hydrateDraft]);
 
+  const persistSavedSongs = useCallback((songs: SavedSong[]) => {
+    setSavedSongs(songs);
+    localStorage.setItem(SONG_LIBRARY_STORAGE_KEY, JSON.stringify(songs));
+  }, []);
+
+  const saveCurrentSongToLibrary = useCallback(() => {
+    const title = meta.title.trim() || "無題の歌唱譜";
+    const existingSong =
+      savedSongs.find((song) => song.id === songLibrarySelectionId) ??
+      savedSongs.find((song) => song.title === title);
+    const songId = existingSong?.id ?? createId();
+    const nextSong: SavedSong = {
+      id: songId,
+      title,
+      vocalist: meta.vocalist.trim(),
+      updatedAt: new Date().toISOString(),
+      draft
+    };
+    const nextSongs = [
+      nextSong,
+      ...savedSongs.filter((song) => song.id !== songId)
+    ].slice(0, 60);
+
+    persistSavedSongs(nextSongs);
+    setSongLibrarySelectionId(songId);
+    setStatus(`${title}を曲保存しました`);
+  }, [
+    draft,
+    meta.title,
+    meta.vocalist,
+    persistSavedSongs,
+    savedSongs,
+    songLibrarySelectionId
+  ]);
+
+  const loadSongFromLibrary = useCallback(
+    (songId: string) => {
+      const song = savedSongs.find((candidate) => candidate.id === songId);
+      if (!song) {
+        setStatus("読み込む曲を選んでください");
+        return;
+      }
+
+      hydrateDraft(song.draft);
+      setSongLibrarySelectionId(song.id);
+      setStatus(`${song.title}を読み込みました`);
+    },
+    [hydrateDraft, savedSongs]
+  );
+
+  const deleteSongFromLibrary = useCallback(
+    (songId: string) => {
+      const song = savedSongs.find((candidate) => candidate.id === songId);
+      if (!song) {
+        return;
+      }
+
+      if (!window.confirm(`${song.title}を曲保存から削除しますか？`)) {
+        return;
+      }
+
+      const nextSongs = savedSongs.filter((candidate) => candidate.id !== songId);
+      persistSavedSongs(nextSongs);
+      setSongLibrarySelectionId(nextSongs[0]?.id ?? "");
+      setStatus(`${song.title}を削除しました`);
+    },
+    [persistSavedSongs, savedSongs]
+  );
+
   const updateItem = useCallback((id: string, patch: Partial<SheetItem>) => {
     setItems((current) =>
       current.map((item) => (item.id === id ? { ...item, ...patch } : item))
     );
   }, []);
+
+  const getEditableItemLabel = useCallback(
+    (item: SheetItem) => {
+      if (item.toolId !== "lyric") {
+        return item.label;
+      }
+
+      return (
+        item.originalLabel ??
+        lyricDisplayFallbacks.get(item.id)?.original ??
+        item.label
+      );
+    },
+    [lyricDisplayFallbacks]
+  );
+
+  const updateItemLabel = useCallback(
+    (id: string, label: string) => {
+      setItems((current) =>
+        current.map((item) => {
+          if (item.id !== id) {
+            return item;
+          }
+
+          if (item.toolId !== "lyric") {
+            return { ...item, label };
+          }
+
+          const readingLabel = roughHiragana(label, readingCorrectionEntries);
+          return {
+            ...item,
+            label,
+            originalLabel: label,
+            readingLabel,
+            vowelLabel: toVowels(readingLabel)
+          };
+        })
+      );
+    },
+    [readingCorrectionEntries]
+  );
 
   const removeSelected = useCallback(() => {
     if (!selectedId) {
@@ -2053,10 +2252,38 @@ export default function Home() {
   }, [convertTextToReadingPreservingSections, readingLyrics, sourceLyrics]);
 
   const placeTextOnSheet = useCallback(
-    (text: string, toolId: Extract<ToolId, "lyric" | "vowel">) => {
+    (
+      text: string,
+      toolId: Extract<ToolId, "lyric" | "vowel">,
+      variants: LyricLineVariant[] = []
+    ) => {
       const sectionBlocks = parseSectionedLyrics(text);
       const tool = TOOL_BY_ID[toolId];
       const placedItems: SheetItem[] = [];
+      let variantIndex = 0;
+
+      const createPlacedTextItem = (line: string, rowIndex: number): SheetItem => {
+        const system = getSystemForRow(rowIndex);
+        const variant = variants[variantIndex] ?? {};
+        variantIndex += 1;
+        const label = toolId === "lyric" ? variant.original ?? line : line;
+
+        return {
+          id: createId(),
+          toolId,
+          label,
+          originalLabel: toolId === "lyric" ? label : undefined,
+          readingLabel: toolId === "lyric" ? variant.reading : undefined,
+          vowelLabel: toolId === "lyric" ? variant.vowel : undefined,
+          x: LYRIC_LINE_X,
+          y: getLyricPlacementY(system, toolId, sheetLayoutMode),
+          pageIndex: getRowPageIndex(rowIndex),
+          size: tool.size,
+          color: tool.color,
+          width: LYRIC_LINE_WIDTH,
+          align: "left"
+        };
+      };
 
       if (sectionBlocks.length > 0) {
         const nextSections = createSectionsFromLyricBlocks(sectionBlocks, sections);
@@ -2072,19 +2299,7 @@ export default function Home() {
           const endRow = getSectionEndRow(section);
           block.lines.slice(0, endRow - startRow + 1).forEach((line, lineIndex) => {
             const rowIndex = startRow + lineIndex;
-            const system = getSystemForRow(rowIndex);
-            placedItems.push({
-              id: createId(),
-              toolId,
-              label: line,
-              x: LYRIC_LINE_X,
-              y: getLyricPlacementY(system, toolId, sheetLayoutMode),
-              pageIndex: getRowPageIndex(rowIndex),
-              size: tool.size,
-              color: tool.color,
-              width: LYRIC_LINE_WIDTH,
-              align: "left"
-            });
+            placedItems.push(createPlacedTextItem(line, rowIndex));
           });
         });
 
@@ -2114,19 +2329,7 @@ export default function Home() {
       }
 
       lines.slice(0, MAX_SHEET_ROWS).forEach((line, rowIndex) => {
-        const system = getSystemForRow(rowIndex);
-        placedItems.push({
-          id: createId(),
-          toolId,
-          label: line,
-          x: LYRIC_LINE_X,
-          y: getLyricPlacementY(system, toolId, sheetLayoutMode),
-          pageIndex: getRowPageIndex(rowIndex),
-          size: tool.size,
-          color: tool.color,
-          width: LYRIC_LINE_WIDTH,
-          align: "left"
-        });
+        placedItems.push(createPlacedTextItem(line, rowIndex));
       });
 
       setItems((current) => [...current, ...placedItems]);
@@ -2144,6 +2347,63 @@ export default function Home() {
     },
     [sections, sheetLayoutMode]
   );
+
+  const placeLyricsOnSheet = useCallback(async () => {
+    const placementSource = sourceLyrics.trim() ? sourceLyrics : readingLyrics;
+    if (!placementSource.trim()) {
+      setStatus("配置する歌詞なし");
+      return;
+    }
+
+    setIsConverting(true);
+    setStatus("歌詞配置の準備中");
+
+    try {
+      let nextReadingLyrics = readingLyrics;
+      if (!nextReadingLyrics.trim()) {
+        const result = await convertTextToReadingPreservingSections(placementSource);
+        nextReadingLyrics = result.reading;
+        setReadingLyrics(nextReadingLyrics);
+      }
+
+      let nextVowelLyrics = vowelLyrics;
+      if (!nextVowelLyrics.trim()) {
+        nextVowelLyrics = convertSectionedTextToVowels(nextReadingLyrics);
+        setVowelLyrics(nextVowelLyrics);
+      }
+
+      const originalLines = flattenLyricLines(placementSource);
+      const readingLines = flattenLyricLines(nextReadingLyrics);
+      const vowelLines = flattenLyricLines(nextVowelLyrics);
+      const variants = originalLines.map((original, index) => ({
+        original,
+        reading: readingLines[index],
+        vowel: vowelLines[index]
+      }));
+
+      placeTextOnSheet(placementSource, "lyric", variants);
+    } catch {
+      const fallbackOriginalLines = flattenLyricLines(placementSource);
+      const variants = fallbackOriginalLines.map((original) => {
+        const reading = roughHiragana(original, readingCorrectionEntries);
+        return {
+          original,
+          reading,
+          vowel: toVowels(reading)
+        };
+      });
+      placeTextOnSheet(placementSource, "lyric", variants);
+    } finally {
+      setIsConverting(false);
+    }
+  }, [
+    convertTextToReadingPreservingSections,
+    placeTextOnSheet,
+    readingCorrectionEntries,
+    readingLyrics,
+    sourceLyrics,
+    vowelLyrics
+  ]);
 
   const convertToReading = useCallback(async () => {
     setIsConverting(true);
@@ -2283,6 +2543,29 @@ export default function Home() {
       }
     }
   }, [hydrateDraft]);
+
+  useEffect(() => {
+    const raw = localStorage.getItem(SONG_LIBRARY_STORAGE_KEY);
+    if (!raw) {
+      return;
+    }
+
+    try {
+      const songs = JSON.parse(raw) as SavedSong[];
+      if (Array.isArray(songs)) {
+        setSavedSongs(
+          songs
+            .filter((song) => song?.id && song?.draft)
+            .sort(
+              (a, b) =>
+                new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+            )
+        );
+      }
+    } catch {
+      // Keep the app usable if old library data is malformed.
+    }
+  }, []);
 
   useEffect(() => {
     if (!window.location.hash.startsWith("#share=")) {
@@ -3081,7 +3364,7 @@ export default function Home() {
           rowItems
             .slice()
             .sort((a, b) => a.x - b.x)
-            .map((item) => item.label)
+            .map((item) => getEditableItemLabel(item))
             .join(" ")
             .trim()
         )
@@ -3270,9 +3553,8 @@ export default function Home() {
                 <button
                   type="button"
                   className="wide-button"
-                  onClick={() =>
-                    placeTextOnSheet(readingLyrics || sourceLyrics, "lyric")
-                  }
+                  onClick={() => void placeLyricsOnSheet()}
+                  disabled={isConverting}
                 >
                   <Plus size={16} />
                   <span>歌詞を配置</span>
@@ -3297,6 +3579,81 @@ export default function Home() {
                   <Plus size={16} />
                   <span>母音を配置</span>
                 </button>
+              </>
+            )}
+          </section>
+
+          <section className="panel-section song-library-panel">
+            <button
+              type="button"
+              className="section-heading section-toggle"
+              onClick={() => togglePanel("library")}
+              aria-expanded={!collapsedPanels.library}
+            >
+              <Save size={18} />
+              <span>曲保存</span>
+              <ChevronDown
+                className={`section-chevron ${
+                  collapsedPanels.library ? "collapsed" : ""
+                }`}
+                size={18}
+              />
+            </button>
+            {!collapsedPanels.library && (
+              <>
+                <button
+                  type="button"
+                  className="wide-button"
+                  onClick={saveCurrentSongToLibrary}
+                >
+                  <Save size={16} />
+                  <span>この曲を保存</span>
+                </button>
+                <label className="field-label" htmlFor="songLibrarySelect">
+                  保存済み
+                </label>
+                <select
+                  id="songLibrarySelect"
+                  value={songLibrarySelectionId}
+                  onChange={(event) => setSongLibrarySelectionId(event.target.value)}
+                >
+                  <option value="">曲を選択</option>
+                  {savedSongs.map((song) => (
+                    <option key={song.id} value={song.id}>
+                      {song.title}
+                      {song.vocalist ? ` / ${song.vocalist}` : ""}
+                    </option>
+                  ))}
+                </select>
+                <div className="button-row">
+                  <button
+                    type="button"
+                    className="control-button"
+                    onClick={() => loadSongFromLibrary(songLibrarySelectionId)}
+                    disabled={!songLibrarySelectionId}
+                  >
+                    <FolderOpen size={16} />
+                    <span>読込</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="control-button danger"
+                    onClick={() => deleteSongFromLibrary(songLibrarySelectionId)}
+                    disabled={!songLibrarySelectionId}
+                  >
+                    <Trash2 size={16} />
+                    <span>削除</span>
+                  </button>
+                </div>
+                <p className="song-library-status">
+                  {savedSongs.length > 0
+                    ? `${savedSongs.length}曲保存済み${
+                        savedSongs[0]?.updatedAt
+                          ? ` / 最新 ${formatSavedSongDate(savedSongs[0].updatedAt)}`
+                          : ""
+                      }`
+                    : "まだ曲保存はありません"}
+                </p>
               </>
             )}
           </section>
@@ -3899,7 +4256,7 @@ export default function Home() {
                             <strong>{sectionLabel}</strong>
                             {measureLabel && <small>{measureLabel}</small>}
                           </span>
-                          <span>コード</span>
+                          <span className="chord-lane-label" aria-label="コード欄" />
                         </div>
                         <div className="staff-lines" aria-hidden="true">
                           {[0, 1, 2, 3, 4].map((lineIndex) => (
@@ -3956,16 +4313,19 @@ export default function Home() {
                           key={item.id}
                           className={`sheet-inline-editor ${sheetItemClassName}`}
                           style={itemStyle}
-                          value={item.label}
+                          value={getEditableItemLabel(item)}
                           rows={Math.min(
                             8,
-                            Math.max(2, item.label.split(/\r?\n/).length)
+                            Math.max(
+                              2,
+                              getEditableItemLabel(item).split(/\r?\n/).length
+                            )
                           )}
                           autoFocus
                           onPointerDown={(event) => event.stopPropagation()}
                           onClick={(event) => event.stopPropagation()}
                           onChange={(event) =>
-                            updateItem(item.id, { label: event.target.value })
+                            updateItemLabel(item.id, event.target.value)
                           }
                           onBlur={() => {
                             setEditingItemId("");
@@ -4000,9 +4360,12 @@ export default function Home() {
                             return;
                           }
 
-                          const nextLabel = window.prompt("表示", item.label);
+                          const nextLabel = window.prompt(
+                            "表示",
+                            getEditableItemLabel(item)
+                          );
                           if (nextLabel !== null) {
-                            updateItem(item.id, { label: nextLabel });
+                            updateItemLabel(item.id, nextLabel);
                           }
                         }}
                         title={
@@ -4436,9 +4799,9 @@ export default function Home() {
                 </label>
                 <input
                   id="itemLabel"
-                  value={selectedItem.label}
+                  value={getEditableItemLabel(selectedItem)}
                   onChange={(event) =>
-                    updateItem(selectedItem.id, { label: event.target.value })
+                    updateItemLabel(selectedItem.id, event.target.value)
                   }
                 />
 

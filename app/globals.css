@@ -378,6 +378,14 @@ button:focus-visible {
   line-height: 1.45;
 }
 
+.song-library-status {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
 .qr-share-box {
   display: grid;
   justify-items: center;
@@ -847,7 +855,10 @@ kbd {
     linear-gradient(rgba(245, 158, 11, 0.08) 1px, transparent 1px),
     #edf4f7;
   background-size: 28px 28px;
-  overscroll-behavior: contain;
+  overscroll-behavior: auto;
+  scroll-behavior: smooth;
+  scrollbar-gutter: stable both-edges;
+  touch-action: pan-y;
 }
 
 .score-page {
@@ -862,6 +873,7 @@ kbd {
     #fff;
   box-shadow: var(--shadow);
   cursor: crosshair;
+  touch-action: pan-y;
   user-select: none;
 }
 
@@ -1078,8 +1090,29 @@ kbd {
   content: "歌詞";
 }
 
-.score-page.hide-chords .phrase-row-header span:nth-child(2) {
-  opacity: 0.28;
+.chord-lane-label {
+  color: transparent;
+}
+
+.score-page.hide-chords .phrase-row-header {
+  height: 18%;
+  border-bottom: 0;
+  background: transparent;
+  pointer-events: none;
+}
+
+.score-page.hide-chords .chord-lane-label {
+  display: none;
+}
+
+.score-page.hide-chords .note-writing-lane {
+  top: 30%;
+  height: 25%;
+}
+
+.score-page.hide-chords .lyric-writing-lane {
+  bottom: 11%;
+  height: 31%;
 }
 
 .sheet-item {
@@ -1721,7 +1754,8 @@ kbd {
     max-width: 100%;
     min-height: auto;
     display: block;
-    overflow-x: hidden;
+    overflow: visible;
+    overscroll-behavior: auto;
     -webkit-overflow-scrolling: touch;
     padding: 8px;
   }
@@ -1731,6 +1765,10 @@ kbd {
     max-width: 100%;
     aspect-ratio: 1 / 2.05;
     margin: 0;
+  }
+
+  .score-page + .score-page {
+    margin-top: 12px;
   }
 
   .score-page.layout-staff {
@@ -1758,6 +1796,10 @@ kbd {
   }
 
   .phrase-row-header {
+    grid-template-columns: 50px 1fr;
+  }
+
+  .score-page.hide-chords .phrase-row-header {
     grid-template-columns: 50px 1fr;
   }
 
