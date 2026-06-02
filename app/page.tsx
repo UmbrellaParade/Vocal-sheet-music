@@ -316,7 +316,7 @@ const ALL_SHEET_TOOLS: ToolSpec[] = [
     label: "W",
     shortcut: "V",
     color: "#22a85a",
-    size: 23,
+    size: 18,
     kind: "symbol"
   },
   {
@@ -325,7 +325,7 @@ const ALL_SHEET_TOOLS: ToolSpec[] = [
     label: "V",
     shortcut: "B",
     color: "#60a5fa",
-    size: 21,
+    size: 18,
     kind: "symbol"
   },
   {
@@ -334,7 +334,7 @@ const ALL_SHEET_TOOLS: ToolSpec[] = [
     label: "↗",
     shortcut: "S",
     color: "#dc2626",
-    size: 22,
+    size: 18,
     kind: "symbol"
   },
   {
@@ -343,7 +343,7 @@ const ALL_SHEET_TOOLS: ToolSpec[] = [
     label: "↘",
     shortcut: "F",
     color: "#9333ea",
-    size: 22,
+    size: 18,
     kind: "symbol"
   },
   {
@@ -352,7 +352,7 @@ const ALL_SHEET_TOOLS: ToolSpec[] = [
     label: "○",
     shortcut: "U",
     color: "#0891b2",
-    size: 23,
+    size: 18,
     kind: "symbol"
   },
   {
@@ -361,7 +361,7 @@ const ALL_SHEET_TOOLS: ToolSpec[] = [
     label: ">",
     shortcut: "A",
     color: "#fb7185",
-    size: 22,
+    size: 18,
     kind: "symbol"
   },
   {
@@ -379,7 +379,7 @@ const ALL_SHEET_TOOLS: ToolSpec[] = [
     label: "━",
     shortcut: "H",
     color: "#facc15",
-    size: 22,
+    size: 18,
     kind: "symbol"
   },
   {
@@ -388,7 +388,7 @@ const ALL_SHEET_TOOLS: ToolSpec[] = [
     label: "<",
     shortcut: "Q",
     color: "#334155",
-    size: 25,
+    size: 18,
     kind: "symbol"
   },
   {
@@ -397,7 +397,7 @@ const ALL_SHEET_TOOLS: ToolSpec[] = [
     label: ">",
     shortcut: "E",
     color: "#334155",
-    size: 25,
+    size: 18,
     kind: "symbol"
   },
   {
@@ -420,17 +420,18 @@ const ALL_SHEET_TOOLS: ToolSpec[] = [
   }
 ];
 
-const LEGACY_SYMBOL_SIZE_BY_ID: Partial<Record<ToolId, number>> = {
-  vibrato: 30,
-  breath: 26,
-  scoop: 28,
-  fall: 28,
-  kobushi: 30,
-  accent: 28,
-  diction: 24,
-  hold: 28,
-  crescendo: 34,
-  decrescendo: 34
+// 旧サイズ → 新サイズへの自動移行用（複数世代対応）
+const LEGACY_SYMBOL_SIZES_BY_ID: Partial<Record<ToolId, number[]>> = {
+  vibrato: [30, 23],
+  breath: [26, 21],
+  scoop: [28, 22],
+  fall: [28, 22],
+  kobushi: [30, 23],
+  accent: [28, 22],
+  diction: [24],
+  hold: [28, 22],
+  crescendo: [34, 25],
+  decrescendo: [34, 25]
 };
 
 const SYSTEMS = [
@@ -1515,15 +1516,12 @@ function isSheetLyricItem(item: SheetItem) {
 function normalizeDraftItems(items: SheetItem[]) {
   return items.map((item) => {
     const tool = TOOL_BY_ID[item.toolId];
-    const legacySymbolSize = LEGACY_SYMBOL_SIZE_BY_ID[item.toolId];
+    const legacySizes = LEGACY_SYMBOL_SIZES_BY_ID[item.toolId];
     const pageIndex = getItemPageIndex(item);
     const normalizedItem = { ...item, pageIndex };
 
-    if (
-      tool?.kind === "symbol" &&
-      legacySymbolSize &&
-      item.size === legacySymbolSize
-    ) {
+    // 旧サイズ（複数世代）のいずれかに一致したら新サイズへ移行
+    if (tool?.kind === "symbol" && legacySizes?.includes(item.size)) {
       return { ...normalizedItem, size: tool.size };
     }
 
