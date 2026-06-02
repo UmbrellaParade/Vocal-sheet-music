@@ -1672,15 +1672,97 @@ kbd {
     max-width: 100%;
     min-height: auto;
     display: block;
-    overflow-x: auto;
+    overflow-x: hidden;
     -webkit-overflow-scrolling: touch;
-    padding: 10px;
+    padding: 8px;
   }
 
   .score-page {
-    width: 680px;
-    max-width: none;
+    width: 100%;
+    max-width: 100%;
+    aspect-ratio: 1 / 2.05;
     margin: 0;
+  }
+
+  .score-page.layout-staff {
+    aspect-ratio: 1 / 1.55;
+  }
+
+  .page-meta {
+    left: 5%;
+    right: 5%;
+    top: 2%;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 3px 8px;
+    font-size: 10px;
+  }
+
+  .page-meta strong {
+    grid-column: 1 / -1;
+    font-size: 16px;
+  }
+
+  .system {
+    left: 4%;
+    right: 4%;
+    border-radius: 6px;
+  }
+
+  .phrase-row-header {
+    grid-template-columns: 50px 1fr;
+  }
+
+  .phrase-row-header span {
+    padding: 0 3px;
+    font-size: 8px;
+  }
+
+  .section-cell strong {
+    font-size: 8px;
+  }
+
+  .section-cell small {
+    font-size: 7px;
+  }
+
+  .score-page.layout-staff .staff-lines {
+    left: 54px;
+    right: 10px;
+  }
+
+  .lyric-writing-lane,
+  .note-writing-lane {
+    left: 54px;
+    right: 10px;
+  }
+
+  .lyric-writing-lane::before,
+  .note-writing-lane::before {
+    left: -46px;
+    width: 40px;
+    font-size: 8px;
+  }
+
+  .score-page .sheet-text.align-left {
+    transform: translateY(-72%);
+  }
+
+  .score-page .sheet-text.tool-lyric {
+    font-size: clamp(11.5px, 3.2vw, 13px) !important;
+    line-height: 1.26;
+  }
+
+  .score-page .sheet-text.tool-vowel {
+    font-size: clamp(11px, 3vw, 12px) !important;
+    line-height: 1.24;
+  }
+
+  .score-page .sheet-chord {
+    font-size: clamp(12px, 3.6vw, 14px) !important;
+  }
+
+  .score-page .sheet-symbol {
+    font-size: clamp(15px, 4.8vw, 19px) !important;
   }
 
   .icon-button span {
@@ -1770,10 +1852,6 @@ kbd {
   .icon-button {
     min-height: 36px;
     padding: 0 9px;
-  }
-
-  .score-page {
-    width: 640px;
   }
 }
 
