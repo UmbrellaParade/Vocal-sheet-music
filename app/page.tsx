@@ -126,8 +126,16 @@ type LyricTextMark = {
   start: number;
   end: number;
   color: string;
+  toolId?: ToolId;
+  label?: string;
+  style?: LyricTextMarkStyle;
+  direction?: HarmonyDirection;
   comment?: string;
 };
+
+type LyricTextMarkStyle = "fill" | "underline" | "box" | "circle";
+
+type HarmonyDirection = "upper" | "lower" | "unison";
 
 type SheetMeta = {
   title: string;
@@ -783,6 +791,29 @@ const SHEET_TOOLS = ALL_SHEET_TOOLS.filter(
 const TOPLINE_TOOLS = ALL_SHEET_TOOLS.filter(
   (tool) => tool.category === "topline"
 );
+
+const TOPLINE_MARK_CONFIG: Partial<
+  Record<
+    ToolId,
+    {
+      label: string;
+      style: LyricTextMarkStyle;
+      direction?: HarmonyDirection;
+    }
+  >
+> = {
+  harmony: { label: "ハモ", style: "underline" },
+  harmony_fu: { label: "Fu", style: "box" },
+  harmony_lyric: { label: "歌ハモ", style: "underline", direction: "upper" },
+  double: { label: "DBL", style: "box" },
+  double_phrase: { label: "P-DBL", style: "box" },
+  double_word: { label: "W-DBL", style: "circle" },
+  topline_unison: { label: "UNI", style: "underline", direction: "unison" },
+  topline_oct_up: { label: "+8va", style: "underline", direction: "upper" },
+  topline_oct_down: { label: "-8va", style: "underline", direction: "lower" },
+  topline_effect: { label: "FX", style: "fill" },
+  topline_marker: { label: "MEMO", style: "fill" }
+};
 
 const TOOL_BY_ID = ALL_SHEET_TOOLS.reduce(
   (lookup, tool) => ({ ...lookup, [tool.id]: tool }),
@@ -1699,11 +1730,65 @@ function normalizeTextMarks(
         ...mark,
         start: Math.min(start, end),
         end: Math.max(start, end),
-        color: mark.color || HIGHLIGHT_SWATCHES[0]
+        color: mark.color || HIGHLIGHT_SWATCHES[0],
+        style: mark.style ?? "fill"
       };
     })
     .filter((mark) => mark.end > mark.start)
     .sort((a, b) => a.start - b.start || a.end - b.end);
+}
+
+function isToplineToolId(toolId: ToolId | undefined) {
+  return Boolean(toolId && TOOL_BY_ID[toolId]?.category === "topline");
+}
+
+function hexToRgba(color: string, alpha: number) {
+  const normalized = color.trim();
+  const match = normalized.match(/^#?([0-9a-f]{6})$/i);
+  if (!match) {
+    return normalized;
+  }
+
+  const raw = match[1];
+  const red = parseInt(raw.slice(0, 2), 16);
+  const green = parseInt(raw.slice(2, 4), 16);
+  const blue = parseInt(raw.slice(4, 6), 16);
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+}
+
+function getTextMarkLabel(mark: LyricTextMark) {
+  if (mark.label?.trim()) {
+    return mark.label.trim();
+  }
+
+  if (mark.toolId) {
+    return TOPLINE_MARK_CONFIG[mark.toolId]?.label ?? TOOL_BY_ID[mark.toolId]?.label;
+  }
+
+  return "";
+}
+
+function getDirectionLabel(direction: HarmonyDirection | undefined) {
+  if (direction === "upper") {
+    return "上";
+  }
+  if (direction === "lower") {
+    return "下";
+  }
+  if (direction === "unison") {
+    return "同";
+  }
+  return "";
+}
+
+function getTextMarkTitle(mark: LyricTextMark) {
+  return [
+    getTextMarkLabel(mark),
+    getDirectionLabel(mark.direction),
+    mark.comment
+  ]
+    .filter(Boolean)
+    .join(" / ");
 }
 
 function normalizeDraftItems(items: SheetItem[]) {
@@ -1757,26 +1842,85 @@ function renderMarkedLyricText(label: string, marks: LyricTextMark[] | undefined
   const parts: ReactNode[] = [];
   let cursor = 0;
 
-  normalizedMarks.forEach((mark) => {
-    if (mark.start > cursor) {
-      parts.push(label.slice(cursor, mark.start));
+  while (cursor < label.length) {
+    const activeMarks = normalizedMarks.filter(
+      (mark) => mark.start <= cursor && mark.end > cursor
+    );
+
+    if (activeMarks.length === 0) {
+      const nextMarkStart =
+        normalizedMarks
+          .filter((mark) => mark.start > cursor)
+          .map((mark) => mark.start)
+          .sort((a, b) => a - b)[0] ?? label.length;
+      parts.push(label.slice(cursor, nextMarkStart));
+      cursor = nextMarkStart;
+      continue;
     }
+
+    const activeKey = activeMarks.map((mark) => mark.id).join("|");
+    let end = cursor + 1;
+    while (end < label.length) {
+      const nextKey = normalizedMarks
+        .filter((mark) => mark.start <= end && mark.end > end)
+        .map((mark) => mark.id)
+        .join("|");
+      if (nextKey !== activeKey) {
+        break;
+      }
+      end += 1;
+    }
+
+    const primaryMark =
+      activeMarks.find((mark) => mark.style === "fill") ?? activeMarks[0];
+    const toplineMarks = activeMarks.filter((mark) =>
+      isToplineToolId(mark.toolId)
+    );
+    const styleNames = Array.from(
+      new Set(activeMarks.map((mark) => mark.style ?? "fill"))
+    );
+    const title = activeMarks
+      .map((mark) => getTextMarkTitle(mark))
+      .filter(Boolean)
+      .join("\n");
 
     parts.push(
       <span
-        key={mark.id}
-        className={`lyric-text-mark ${mark.comment ? "has-comment" : ""}`}
-        style={{ "--range-highlight-color": mark.color } as CSSProperties}
-        title={mark.comment || undefined}
+        key={`${cursor}-${end}-${activeKey}`}
+        className={`lyric-text-mark ${styleNames
+          .map((styleName) => `mark-style-${styleName}`)
+          .join(" ")} ${toplineMarks.length ? "has-topline-tags" : ""} ${
+          activeMarks.some((mark) => mark.comment) ? "has-comment" : ""
+        }`}
+        style={
+          {
+            "--range-highlight-color": primaryMark.color,
+            "--range-highlight-soft": hexToRgba(primaryMark.color, 0.22),
+            "--range-line-color": toplineMarks[0]?.color ?? primaryMark.color
+          } as CSSProperties
+        }
+        title={title || undefined}
       >
-        {label.slice(mark.start, mark.end)}
+        {toplineMarks.length > 0 && (
+          <span className="topline-mark-badges" aria-hidden="true">
+            {toplineMarks.slice(0, 4).map((mark) => (
+              <span
+                key={mark.id}
+                className="topline-mark-badge"
+                style={{ "--topline-badge-color": mark.color } as CSSProperties}
+              >
+                {getTextMarkLabel(mark)}
+                {getDirectionLabel(mark.direction) && (
+                  <small>{getDirectionLabel(mark.direction)}</small>
+                )}
+              </span>
+            ))}
+          </span>
+        )}
+        <span className="lyric-marked-text">{label.slice(cursor, end)}</span>
       </span>
     );
-    cursor = mark.end;
-  });
-
-  if (cursor < label.length) {
-    parts.push(label.slice(cursor));
+    cursor = end;
   }
 
   return parts;
@@ -1943,6 +2087,8 @@ export default function Home() {
   const [items, setItems] = useState<SheetItem[]>([]);
   const [activeTool, setActiveTool] = useState<ToolId | "">("");
   const [activeHighlightColor, setActiveHighlightColor] = useState<string>("");
+  const [activeTextMarkStyle, setActiveTextMarkStyle] =
+    useState<LyricTextMarkStyle>("fill");
   const [selectedTextMarkRef, setSelectedTextMarkRef] = useState<{
     itemId: string;
     markId: string;
@@ -2024,6 +2170,9 @@ export default function Home() {
     [items, selectedId]
   );
   const activeToolSpec = activeTool ? TOOL_BY_ID[activeTool] : null;
+  const activeToplineTool =
+    activeToolSpec?.category === "topline" ? activeToolSpec : null;
+  const isRangeMarkModeActive = Boolean(activeHighlightColor || activeToplineTool);
   const readingCorrectionEntries = useMemo(
     () => parseReadingCorrections(readingCorrections),
     [readingCorrections]
@@ -2677,7 +2826,9 @@ export default function Home() {
       color: string,
       comment: string | undefined,
       labelLength: number,
-      markId = createId()
+      markId = createId(),
+      markOptions: Partial<LyricTextMark> = {},
+      allowOverlap = false
     ) => {
       const normalizedStart = clamp(Math.min(start, end), 0, labelLength);
       const normalizedEnd = clamp(Math.max(start, end), 0, labelLength);
@@ -2696,6 +2847,7 @@ export default function Home() {
           const nonOverlappingMarks = currentMarks.filter(
             (mark) => mark.end <= normalizedStart || mark.start >= normalizedEnd
           );
+          const baseMarks = allowOverlap ? currentMarks : nonOverlappingMarks;
 
           if (color === "clear") {
             return {
@@ -2708,12 +2860,13 @@ export default function Home() {
             ...item,
             textMarks: normalizeTextMarks(
               [
-                ...nonOverlappingMarks,
+                ...baseMarks,
                 {
                   id: markId,
                   start: normalizedStart,
                   end: normalizedEnd,
                   color,
+                  ...markOptions,
                   comment: comment?.trim() || undefined
                 }
               ],
@@ -2736,7 +2889,22 @@ export default function Home() {
 
   const handleLyricTextMouseUp = useCallback(
     (event: ReactMouseEvent<HTMLElement>, item: SheetItem, label: string) => {
-      if (!activeHighlightColor || !isSheetLyricItem(item)) {
+      const toplineTool = activeToplineTool;
+      const toplineConfig = toplineTool
+        ? TOPLINE_MARK_CONFIG[toplineTool.id]
+        : undefined;
+      const rangeMarkColor =
+        toplineTool?.color ?? activeHighlightColor;
+      const rangeMarkOptions: Partial<LyricTextMark> = toplineTool
+        ? {
+            toolId: toplineTool.id,
+            label: toplineConfig?.label ?? toplineTool.label,
+            style: toplineConfig?.style ?? "underline",
+            direction: toplineConfig?.direction
+          }
+        : { style: activeTextMarkStyle };
+
+      if (!rangeMarkColor || !isSheetLyricItem(item)) {
         return;
       }
 
@@ -2779,20 +2947,27 @@ export default function Home() {
           item.id,
           start,
           end,
-          activeHighlightColor,
+          rangeMarkColor,
           undefined,
           label.length,
-          markId
+          markId,
+          rangeMarkOptions,
+          Boolean(toplineTool)
         );
         selection.removeAllRanges();
         setSelectedId(item.id);
         setSelectedTextMarkRef(
-          activeHighlightColor === "clear" ? null : { itemId: item.id, markId }
+          rangeMarkColor === "clear" ? null : { itemId: item.id, markId }
         );
         setEditingItemId("");
       }, 0);
     },
-    [activeHighlightColor, applyTextMarkToItem]
+    [
+      activeHighlightColor,
+      activeTextMarkStyle,
+      activeToplineTool,
+      applyTextMarkToItem
+    ]
   );
 
   const startLyricTextRangeDrag = useCallback(
@@ -2801,7 +2976,7 @@ export default function Home() {
       item: SheetItem,
       label: string
     ) => {
-      if (!activeHighlightColor || !isSheetLyricItem(item)) {
+      if (!isRangeMarkModeActive || !isSheetLyricItem(item)) {
         return false;
       }
 
@@ -2826,7 +3001,7 @@ export default function Home() {
       };
       return true;
     },
-    [activeHighlightColor]
+    [isRangeMarkModeActive]
   );
 
   const finishLyricTextRangeDrag = useCallback(
@@ -2835,7 +3010,22 @@ export default function Home() {
       item: SheetItem,
       label: string
     ) => {
-      if (!activeHighlightColor || !isSheetLyricItem(item)) {
+      const toplineTool = activeToplineTool;
+      const toplineConfig = toplineTool
+        ? TOPLINE_MARK_CONFIG[toplineTool.id]
+        : undefined;
+      const rangeMarkColor =
+        toplineTool?.color ?? activeHighlightColor;
+      const rangeMarkOptions: Partial<LyricTextMark> = toplineTool
+        ? {
+            toolId: toplineTool.id,
+            label: toplineConfig?.label ?? toplineTool.label,
+            style: toplineConfig?.style ?? "underline",
+            direction: toplineConfig?.direction
+          }
+        : { style: activeTextMarkStyle };
+
+      if (!rangeMarkColor || !isSheetLyricItem(item)) {
         return;
       }
 
@@ -2876,19 +3066,26 @@ export default function Home() {
         item.id,
         start,
         end,
-        activeHighlightColor,
+        rangeMarkColor,
         undefined,
         label.length,
-        markId
+        markId,
+        rangeMarkOptions,
+        Boolean(toplineTool)
       );
       setSelectedId(item.id);
       setSelectedTextMarkRef(
-        activeHighlightColor === "clear" ? null : { itemId: item.id, markId }
+        rangeMarkColor === "clear" ? null : { itemId: item.id, markId }
       );
       setEditingItemId("");
       window.getSelection()?.removeAllRanges();
     },
-    [activeHighlightColor, applyTextMarkToItem]
+    [
+      activeHighlightColor,
+      activeTextMarkStyle,
+      activeToplineTool,
+      applyTextMarkToItem
+    ]
   );
 
   const getEditableItemLabel = useCallback(
@@ -3011,6 +3208,26 @@ export default function Home() {
               mark.id === markId
                 ? { ...mark, comment: comment.trim() || undefined }
                 : mark
+            )
+          };
+        })
+      );
+    },
+    []
+  );
+
+  const updateTextMark = useCallback(
+    (itemId: string, markId: string, patch: Partial<LyricTextMark>) => {
+      setItems((current) =>
+        current.map((item) => {
+          if (item.id !== itemId) {
+            return item;
+          }
+
+          return {
+            ...item,
+            textMarks: item.textMarks?.map((mark) =>
+              mark.id === markId ? { ...mark, ...patch } : mark
             )
           };
         })
@@ -3883,7 +4100,7 @@ export default function Home() {
     }
 
     // ハイライト / トップラインタグモード中は空白クリックで何もしない
-    if (activeHighlightColor) {
+    if (isRangeMarkModeActive) {
       return;
     }
 
@@ -5651,7 +5868,7 @@ export default function Home() {
                           className={`${sheetItemClassName} range-markable${multiSelectedIds.includes(item.id) ? " drag-selected" : ""}`}
                           style={itemStyle}
                           onPointerDown={(event) =>
-                            activeHighlightColor
+                            isRangeMarkModeActive
                               ? startLyricTextRangeDrag(
                                   event,
                                   item,
@@ -5786,6 +6003,27 @@ export default function Home() {
                       </button>
                     )}
                   </div>
+                </div>
+                <div className="mark-style-row" aria-label="マーク表示">
+                  {[
+                    ["fill", "塗り"],
+                    ["underline", "ライン"],
+                    ["box", "四角"],
+                    ["circle", "〇"]
+                  ].map(([styleValue, label]) => (
+                    <button
+                      key={styleValue}
+                      type="button"
+                      className={
+                        activeTextMarkStyle === styleValue ? "active" : ""
+                      }
+                      onClick={() =>
+                        setActiveTextMarkStyle(styleValue as LyricTextMarkStyle)
+                      }
+                    >
+                      {label}
+                    </button>
+                  ))}
                 </div>
 
                 {(activeToolSpec || activeHighlightColor) && (
@@ -6253,6 +6491,60 @@ export default function Home() {
                       <p className="range-marker-preview">
                         {selectedTextMark.text}
                       </p>
+                      <div className="range-marker-grid">
+                        <label className="field-label" htmlFor="textMarkStyle">
+                          表示
+                        </label>
+                        <select
+                          id="textMarkStyle"
+                          value={selectedTextMark.mark.style ?? "fill"}
+                          onChange={(event) =>
+                            updateTextMark(
+                              selectedTextMark.item.id,
+                              selectedTextMark.mark.id,
+                              {
+                                style:
+                                  event.target.value as LyricTextMarkStyle
+                              }
+                            )
+                          }
+                        >
+                          <option value="fill">塗りつぶし</option>
+                          <option value="underline">ライン</option>
+                          <option value="box">四角で囲む</option>
+                          <option value="circle">〇で囲む</option>
+                        </select>
+                        {isToplineToolId(selectedTextMark.mark.toolId) && (
+                          <>
+                            <label
+                              className="field-label"
+                              htmlFor="textMarkDirection"
+                            >
+                              ハモリ位置
+                            </label>
+                            <select
+                              id="textMarkDirection"
+                              value={selectedTextMark.mark.direction ?? ""}
+                              onChange={(event) =>
+                                updateTextMark(
+                                  selectedTextMark.item.id,
+                                  selectedTextMark.mark.id,
+                                  {
+                                    direction:
+                                      (event.target.value ||
+                                        undefined) as HarmonyDirection | undefined
+                                  }
+                                )
+                              }
+                            >
+                              <option value="">未設定</option>
+                              <option value="upper">上ハモ</option>
+                              <option value="lower">下ハモ</option>
+                              <option value="unison">ユニゾン</option>
+                            </select>
+                          </>
+                        )}
+                      </div>
                       <textarea
                         id="textMarkComment"
                         value={selectedTextMark.mark.comment ?? ""}
