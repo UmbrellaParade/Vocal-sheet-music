@@ -2641,7 +2641,21 @@ export default function Home() {
           });
         });
 
-        setItems((current) => [...current, ...placedItems]);
+        // 配置予定の行にある既存の同種アイテムを除去してからまとめて追加（かぶり防止）
+        const usedRows = new Set<number>();
+        nextSections.forEach((section) => {
+          for (let r = getSectionStartRow(section); r <= getSectionEndRow(section); r += 1) {
+            usedRows.add(r);
+          }
+        });
+        setItems((current) => [
+          ...current.filter(
+            (item) =>
+              item.toolId !== toolId ||
+              !usedRows.has(getItemGlobalRowIndex(item))
+          ),
+          ...placedItems
+        ]);
         setSelectedId(placedItems.at(-1)?.id ?? "");
         const totalLineCount = sectionBlocks.reduce(
           (sum, block) => sum + block.lines.length,
@@ -2670,7 +2684,18 @@ export default function Home() {
         placedItems.push(...createPlacedLineItems(line, rowIndex));
       });
 
-      setItems((current) => [...current, ...placedItems]);
+      // 配置予定の行の既存アイテムを除去してからまとめて追加
+      const flatUsedRows = new Set(
+        Array.from({ length: lines.length }, (_, i) => i)
+      );
+      setItems((current) => [
+        ...current.filter(
+          (item) =>
+            item.toolId !== toolId ||
+            !flatUsedRows.has(getItemGlobalRowIndex(item))
+        ),
+        ...placedItems
+      ]);
       setSelectedId(placedItems.at(-1)?.id ?? "");
       const skippedLineCount = lines.length - placedItems.length;
       const pageCount = placedItems.reduce(
@@ -3254,10 +3279,15 @@ export default function Home() {
 
     // ハイライトモードがONのとき → 歌詞アイテムに色を塗る（ドラッグ・選択はしない）
     if (activeHighlightColor && isSheetLyricItem(item)) {
-      // 同じ色をもう一度タップするとハイライト解除
-      const next =
-        item.highlightColor === activeHighlightColor ? "" : activeHighlightColor;
-      updateItem(item.id, { highlightColor: next });
+      if (activeHighlightColor === "clear") {
+        // 消しゴムモード：ハイライトだけ解除（アイテムは消えない）
+        updateItem(item.id, { highlightColor: "" });
+      } else {
+        // 同じ色をもう一度タップするとハイライト解除
+        const next =
+          item.highlightColor === activeHighlightColor ? "" : activeHighlightColor;
+        updateItem(item.id, { highlightColor: next });
+      }
       return;
     }
 
@@ -4962,12 +4992,22 @@ export default function Home() {
                         aria-pressed={activeHighlightColor === color}
                       />
                     ))}
+                    {/* 消しゴム：タップするだけでハイライト解除（アイテムは消えない） */}
+                    <button
+                      type="button"
+                      className={`highlight-pen-button highlight-eraser ${activeHighlightColor === "clear" ? "active" : ""}`}
+                      onClick={() => selectHighlightColor("clear")}
+                      title="消しゴム（ハイライトだけ解除）"
+                      aria-pressed={activeHighlightColor === "clear"}
+                    >
+                      <Eraser size={13} />
+                    </button>
                     {activeHighlightColor && (
                       <button
                         type="button"
                         className="highlight-pen-clear"
                         onClick={() => setActiveHighlightColor("")}
-                        title="マーキング解除"
+                        title="マーキングモード終了"
                       >
                         <X size={13} />
                       </button>

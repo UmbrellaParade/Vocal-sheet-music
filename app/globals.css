@@ -500,6 +500,25 @@ button:focus-visible {
   transform: scale(1.1);
 }
 
+.highlight-eraser {
+  background: #f1f5f9 !important;
+  color: #64748b;
+  display: grid;
+  place-items: center;
+}
+
+.highlight-eraser:hover {
+  background: #fef3c7 !important;
+  color: #92400e;
+}
+
+.highlight-eraser.active {
+  background: #fef3c7 !important;
+  border-color: #d97706 !important;
+  box-shadow: 0 0 0 2px #fde68a !important;
+  color: #92400e;
+}
+
 .highlight-pen-clear {
   width: 26px;
   height: 26px;
