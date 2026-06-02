@@ -40,7 +40,12 @@ import {
   useRef,
   useState
 } from "react";
-import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
+import type {
+  CSSProperties,
+  MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactNode
+} from "react";
 import {
   convertPreservingKatakana,
   normalizeForSinging,
@@ -109,10 +114,19 @@ type SheetItem = {
   color: string;
   highlightColor?: string;
   comment?: string;
+  textMarks?: LyricTextMark[];
   pitch?: number;
   durationTicks?: number;
   width?: number;
   align?: "left" | "center";
+};
+
+type LyricTextMark = {
+  id: string;
+  start: number;
+  end: number;
+  color: string;
+  comment?: string;
 };
 
 type SheetMeta = {
@@ -209,6 +223,20 @@ type PendingSheetTap = {
   startClientY: number;
   startScrollLeft: number;
   startScrollTop: number;
+};
+
+type PendingTextRangeDrag = {
+  pointerId: number;
+  itemId: string;
+  startOffset: number;
+};
+
+type CaretPointDocument = Document & {
+  caretPositionFromPoint?: (
+    x: number,
+    y: number
+  ) => { offsetNode: Node; offset: number } | null;
+  caretRangeFromPoint?: (x: number, y: number) => Range | null;
 };
 
 type BrowserKuroshiroConverter = {
@@ -1659,12 +1687,36 @@ function isSheetLyricItem(item: SheetItem) {
   return item.toolId === "lyric" || item.toolId === "vowel";
 }
 
+function normalizeTextMarks(
+  marks: LyricTextMark[] | undefined,
+  labelLength: number
+) {
+  return (marks ?? [])
+    .map((mark) => {
+      const start = clamp(Math.floor(mark.start), 0, labelLength);
+      const end = clamp(Math.floor(mark.end), 0, labelLength);
+      return {
+        ...mark,
+        start: Math.min(start, end),
+        end: Math.max(start, end),
+        color: mark.color || HIGHLIGHT_SWATCHES[0]
+      };
+    })
+    .filter((mark) => mark.end > mark.start)
+    .sort((a, b) => a.start - b.start || a.end - b.end);
+}
+
 function normalizeDraftItems(items: SheetItem[]) {
   return items.map((item) => {
     const tool = TOOL_BY_ID[item.toolId];
     const legacySizes = LEGACY_SYMBOL_SIZES_BY_ID[item.toolId];
     const pageIndex = getItemPageIndex(item);
-    const normalizedItem = { ...item, pageIndex };
+    const displayLength = (item.originalLabel ?? item.label ?? "").length;
+    const normalizedItem = {
+      ...item,
+      pageIndex,
+      textMarks: normalizeTextMarks(item.textMarks, displayLength)
+    };
 
     // 旧サイズ（複数世代）のいずれかに一致したら新サイズへ移行
     if (tool?.kind === "symbol" && legacySizes?.includes(item.size)) {
@@ -1694,6 +1746,100 @@ function renderToolGlyph(toolId: ToolId, label: string) {
       <span />
     </span>
   );
+}
+
+function renderMarkedLyricText(label: string, marks: LyricTextMark[] | undefined) {
+  const normalizedMarks = normalizeTextMarks(marks, label.length);
+  if (normalizedMarks.length === 0) {
+    return label;
+  }
+
+  const parts: ReactNode[] = [];
+  let cursor = 0;
+
+  normalizedMarks.forEach((mark) => {
+    if (mark.start > cursor) {
+      parts.push(label.slice(cursor, mark.start));
+    }
+
+    parts.push(
+      <span
+        key={mark.id}
+        className={`lyric-text-mark ${mark.comment ? "has-comment" : ""}`}
+        style={{ "--range-highlight-color": mark.color } as CSSProperties}
+        title={mark.comment || undefined}
+      >
+        {label.slice(mark.start, mark.end)}
+      </span>
+    );
+    cursor = mark.end;
+  });
+
+  if (cursor < label.length) {
+    parts.push(label.slice(cursor));
+  }
+
+  return parts;
+}
+
+function hasTextMarkComment(item: SheetItem) {
+  return Boolean(item.textMarks?.some((mark) => mark.comment?.trim()));
+}
+
+function getTextOffsetFromNode(root: HTMLElement, node: Node, offset: number) {
+  if (!root.contains(node)) {
+    return -1;
+  }
+
+  try {
+    const range = root.ownerDocument.createRange();
+    range.selectNodeContents(root);
+    range.setEnd(node, offset);
+    return range.toString().length;
+  } catch {
+    return -1;
+  }
+}
+
+function getTextOffsetFromPoint(
+  root: HTMLElement,
+  clientX: number,
+  clientY: number,
+  labelLength: number
+) {
+  const documentAtPoint = root.ownerDocument as CaretPointDocument;
+  const caretPosition = documentAtPoint.caretPositionFromPoint?.(
+    clientX,
+    clientY
+  );
+  if (caretPosition) {
+    const offset = getTextOffsetFromNode(
+      root,
+      caretPosition.offsetNode,
+      caretPosition.offset
+    );
+    if (offset >= 0) {
+      return clamp(offset, 0, labelLength);
+    }
+  }
+
+  const caretRange = documentAtPoint.caretRangeFromPoint?.(clientX, clientY);
+  if (caretRange) {
+    const offset = getTextOffsetFromNode(
+      root,
+      caretRange.startContainer,
+      caretRange.startOffset
+    );
+    if (offset >= 0) {
+      return clamp(offset, 0, labelLength);
+    }
+  }
+
+  const rect = root.getBoundingClientRect();
+  const ratio = rect.width
+    ? clamp((clientX - rect.left) / rect.width, 0, 1)
+    : 0;
+  return clamp(Math.round(labelLength * ratio), 0, labelLength);
 }
 
 type StoredAudio = {
@@ -1792,10 +1938,15 @@ export default function Home() {
   const autoScrollFrameRef = useRef<number | null>(null);
   const autoScrollStartTimeRef = useRef(0);
   const pendingSheetTapRef = useRef<PendingSheetTap | null>(null);
+  const pendingTextRangeDragRef = useRef<PendingTextRangeDrag | null>(null);
   const [meta, setMeta] = useState<SheetMeta>(DEFAULT_META);
   const [items, setItems] = useState<SheetItem[]>([]);
   const [activeTool, setActiveTool] = useState<ToolId | "">("");
   const [activeHighlightColor, setActiveHighlightColor] = useState<string>("");
+  const [selectedTextMarkRef, setSelectedTextMarkRef] = useState<{
+    itemId: string;
+    markId: string;
+  } | null>(null);
   // ドラッグ選択（マーキング用）
   const [multiSelectedIds, setMultiSelectedIds] = useState<string[]>([]);
   const [dragSelect, setDragSelect] = useState<{ pointerId: number } | null>(null);
@@ -2247,6 +2398,7 @@ export default function Home() {
 
   const clearSelectionAndTool = useCallback(() => {
     setSelectedId("");
+    setSelectedTextMarkRef(null);
     setEditingItemId("");
     setActiveTool("");
     setActiveHighlightColor("");
@@ -2334,6 +2486,7 @@ export default function Home() {
     setIsAutoScrolling(false);
     setAutoScrollElapsed(0);
     setSelectedId("");
+    setSelectedTextMarkRef(null);
     setEditingItemId("");
     setSongLibrarySelectionId("");
   }, []);
@@ -2516,6 +2669,228 @@ export default function Home() {
     );
   }, []);
 
+  const applyTextMarkToItem = useCallback(
+    (
+      itemId: string,
+      start: number,
+      end: number,
+      color: string,
+      comment: string | undefined,
+      labelLength: number,
+      markId = createId()
+    ) => {
+      const normalizedStart = clamp(Math.min(start, end), 0, labelLength);
+      const normalizedEnd = clamp(Math.max(start, end), 0, labelLength);
+
+      if (normalizedEnd <= normalizedStart) {
+        return;
+      }
+
+      setItems((current) =>
+        current.map((item) => {
+          if (item.id !== itemId) {
+            return item;
+          }
+
+          const currentMarks = normalizeTextMarks(item.textMarks, labelLength);
+          const nonOverlappingMarks = currentMarks.filter(
+            (mark) => mark.end <= normalizedStart || mark.start >= normalizedEnd
+          );
+
+          if (color === "clear") {
+            return {
+              ...item,
+              textMarks: nonOverlappingMarks
+            };
+          }
+
+          return {
+            ...item,
+            textMarks: normalizeTextMarks(
+              [
+                ...nonOverlappingMarks,
+                {
+                  id: markId,
+                  start: normalizedStart,
+                  end: normalizedEnd,
+                  color,
+                  comment: comment?.trim() || undefined
+                }
+              ],
+              labelLength
+            )
+          };
+        })
+      );
+
+      setStatus(
+        color === "clear"
+          ? "選択範囲のマークを外しました"
+          : comment?.trim()
+            ? "選択範囲にマークとメモを追加しました"
+            : "選択範囲をマーキングしました"
+      );
+    },
+    []
+  );
+
+  const handleLyricTextMouseUp = useCallback(
+    (event: ReactMouseEvent<HTMLElement>, item: SheetItem, label: string) => {
+      if (!activeHighlightColor || !isSheetLyricItem(item)) {
+        return;
+      }
+
+      const textRoot = event.currentTarget.querySelector<HTMLElement>(
+        `[data-lyric-text-id="${item.id}"]`
+      );
+      window.setTimeout(() => {
+        if (!textRoot) {
+          return;
+        }
+
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+          return;
+        }
+
+        const range = selection.getRangeAt(0);
+        if (
+          !textRoot.contains(range.startContainer) ||
+          !textRoot.contains(range.endContainer)
+        ) {
+          return;
+        }
+
+        const selectedText = selection.toString();
+        if (!selectedText.trim()) {
+          selection.removeAllRanges();
+          return;
+        }
+
+        const prefixRange = range.cloneRange();
+        prefixRange.selectNodeContents(textRoot);
+        prefixRange.setEnd(range.startContainer, range.startOffset);
+
+        const start = prefixRange.toString().length;
+        const end = start + selectedText.length;
+        const markId = createId();
+
+        applyTextMarkToItem(
+          item.id,
+          start,
+          end,
+          activeHighlightColor,
+          undefined,
+          label.length,
+          markId
+        );
+        selection.removeAllRanges();
+        setSelectedId(item.id);
+        setSelectedTextMarkRef(
+          activeHighlightColor === "clear" ? null : { itemId: item.id, markId }
+        );
+        setEditingItemId("");
+      }, 0);
+    },
+    [activeHighlightColor, applyTextMarkToItem]
+  );
+
+  const startLyricTextRangeDrag = useCallback(
+    (
+      event: ReactPointerEvent<HTMLElement>,
+      item: SheetItem,
+      label: string
+    ) => {
+      if (!activeHighlightColor || !isSheetLyricItem(item)) {
+        return false;
+      }
+
+      const textRoot = event.currentTarget.querySelector<HTMLElement>(
+        `[data-lyric-text-id="${item.id}"]`
+      );
+      if (!textRoot) {
+        return false;
+      }
+
+      event.stopPropagation();
+      setDragging(null);
+      pendingTextRangeDragRef.current = {
+        pointerId: event.pointerId,
+        itemId: item.id,
+        startOffset: getTextOffsetFromPoint(
+          textRoot,
+          event.clientX,
+          event.clientY,
+          label.length
+        )
+      };
+      return true;
+    },
+    [activeHighlightColor]
+  );
+
+  const finishLyricTextRangeDrag = useCallback(
+    (
+      event: ReactPointerEvent<HTMLElement>,
+      item: SheetItem,
+      label: string
+    ) => {
+      if (!activeHighlightColor || !isSheetLyricItem(item)) {
+        return;
+      }
+
+      const pendingRange = pendingTextRangeDragRef.current;
+      pendingTextRangeDragRef.current = null;
+
+      if (
+        !pendingRange ||
+        pendingRange.pointerId !== event.pointerId ||
+        pendingRange.itemId !== item.id
+      ) {
+        return;
+      }
+
+      const textRoot = event.currentTarget.querySelector<HTMLElement>(
+        `[data-lyric-text-id="${item.id}"]`
+      );
+      if (!textRoot) {
+        return;
+      }
+
+      event.stopPropagation();
+      const endOffset = getTextOffsetFromPoint(
+        textRoot,
+        event.clientX,
+        event.clientY,
+        label.length
+      );
+      const start = Math.min(pendingRange.startOffset, endOffset);
+      const end = Math.max(pendingRange.startOffset, endOffset);
+
+      if (end <= start) {
+        return;
+      }
+
+      const markId = createId();
+      applyTextMarkToItem(
+        item.id,
+        start,
+        end,
+        activeHighlightColor,
+        undefined,
+        label.length,
+        markId
+      );
+      setSelectedId(item.id);
+      setSelectedTextMarkRef(
+        activeHighlightColor === "clear" ? null : { itemId: item.id, markId }
+      );
+      setEditingItemId("");
+      window.getSelection()?.removeAllRanges();
+    },
+    [activeHighlightColor, applyTextMarkToItem]
+  );
+
   const getEditableItemLabel = useCallback(
     (item: SheetItem) => {
       if (item.toolId !== "lyric") {
@@ -2598,6 +2973,69 @@ export default function Home() {
     [items, lyricDisplayMode, readingCorrectionEntries]
   );
 
+  const selectedTextMark = useMemo(() => {
+    if (!selectedTextMarkRef) {
+      return null;
+    }
+
+    const item = items.find(
+      (candidate) => candidate.id === selectedTextMarkRef.itemId
+    );
+    const mark = item?.textMarks?.find(
+      (candidate) => candidate.id === selectedTextMarkRef.markId
+    );
+
+    if (!item || !mark) {
+      return null;
+    }
+
+    const label = getItemDisplayLabel(item);
+    return {
+      item,
+      mark,
+      text: label.slice(mark.start, mark.end)
+    };
+  }, [getItemDisplayLabel, items, selectedTextMarkRef]);
+
+  const updateTextMarkComment = useCallback(
+    (itemId: string, markId: string, comment: string) => {
+      setItems((current) =>
+        current.map((item) => {
+          if (item.id !== itemId) {
+            return item;
+          }
+
+          return {
+            ...item,
+            textMarks: item.textMarks?.map((mark) =>
+              mark.id === markId
+                ? { ...mark, comment: comment.trim() || undefined }
+                : mark
+            )
+          };
+        })
+      );
+    },
+    []
+  );
+
+  const removeTextMark = useCallback((itemId: string, markId: string) => {
+    setItems((current) =>
+      current.map((item) => {
+        if (item.id !== itemId) {
+          return item;
+        }
+
+        return {
+          ...item,
+          textMarks: item.textMarks?.filter((mark) => mark.id !== markId)
+        };
+      })
+    );
+    setSelectedTextMarkRef(null);
+    setStatus("選択範囲のマークを削除しました");
+  }, []);
+
   const removeSelected = useCallback(() => {
     if (!selectedId) {
       return;
@@ -2605,6 +3043,7 @@ export default function Home() {
 
     setItems((current) => current.filter((item) => item.id !== selectedId));
     setSelectedId("");
+    setSelectedTextMarkRef(null);
     setEditingItemId("");
     setStatus("削除しました");
   }, [selectedId]);
@@ -3537,27 +3976,13 @@ export default function Home() {
   };
 
   const handleItemPointerDown = (
-    event: ReactPointerEvent<HTMLButtonElement>,
+    event: ReactPointerEvent<HTMLElement>,
     item: SheetItem
   ) => {
     event.stopPropagation();
 
-    // マーキングモード → ドラッグ選択を開始
     if (activeHighlightColor && isSheetLyricItem(item)) {
-      // 消しゴムモードは即時適用（ドラッグ不要）
-      if (activeHighlightColor === "clear") {
-        updateItem(item.id, { highlightColor: "" });
-        return;
-      }
-      // ドラッグ選択開始：先頭アイテムを選択リストに追加
-      // pointer capture でポインターが他の要素に移っても追跡できる
-      try {
-        event.currentTarget.setPointerCapture(event.pointerId);
-      } catch {
-        // setPointerCapture が使えない環境では無視
-      }
-      setMultiSelectedIds([item.id]);
-      setDragSelect({ pointerId: event.pointerId });
+      setDragging(null);
       return;
     }
 
@@ -5145,6 +5570,15 @@ export default function Home() {
                     const isEditableSheetText = isSheetLyricItem(item);
                     const isInlineEditing =
                       editingItemId === item.id && isEditableSheetText;
+                    const itemHasComment =
+                      Boolean(item.comment?.trim()) || hasTextMarkComment(item);
+                    const itemCommentTitle =
+                      item.comment?.trim() ||
+                      item.textMarks
+                        ?.map((mark) => mark.comment?.trim())
+                        .filter(Boolean)
+                        .join("\n") ||
+                      undefined;
                     const itemStyle = {
                       left: `${item.x}%`,
                       top: `${item.y}%`,
@@ -5164,7 +5598,7 @@ export default function Home() {
                     } align-${item.align ?? "center"} ${
                       selectedId === item.id ? "selected" : ""
                     } ${item.highlightColor ? "has-highlight" : ""} ${
-                      item.comment ? "has-comment" : ""
+                      itemHasComment ? "has-comment" : ""
                     }`;
 
                     if (isInlineEditing) {
@@ -5207,6 +5641,57 @@ export default function Home() {
                       );
                     }
 
+                    if (isEditableSheetText) {
+                      return (
+                        <div
+                          key={item.id}
+                          data-item-id={item.id}
+                          role="button"
+                          tabIndex={0}
+                          className={`${sheetItemClassName} range-markable${multiSelectedIds.includes(item.id) ? " drag-selected" : ""}`}
+                          style={itemStyle}
+                          onPointerDown={(event) =>
+                            activeHighlightColor
+                              ? startLyricTextRangeDrag(
+                                  event,
+                                  item,
+                                  displayLabel
+                                )
+                              : handleItemPointerDown(event, item)
+                          }
+                          onPointerUp={(event) =>
+                            finishLyricTextRangeDrag(event, item, displayLabel)
+                          }
+                          onMouseUp={(event) =>
+                            handleLyricTextMouseUp(event, item, displayLabel)
+                          }
+                          onDoubleClick={() => startInlineEdit(item.id)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              startInlineEdit(item.id);
+                            }
+                          }}
+                          title={tool.name}
+                        >
+                          <span
+                            className="item-content lyric-selectable-text"
+                            data-lyric-text-id={item.id}
+                          >
+                            {renderMarkedLyricText(displayLabel, item.textMarks)}
+                          </span>
+                          {itemHasComment && (
+                            <span
+                              className="comment-badge"
+                              title={itemCommentTitle}
+                            >
+                              <MessageSquare size={10} />
+                            </span>
+                          )}
+                        </div>
+                      );
+                    }
+
                     return (
                       <button
                         key={item.id}
@@ -5233,8 +5718,8 @@ export default function Home() {
                         <span className="item-content">
                           {renderToolGlyph(item.toolId, displayLabel)}
                         </span>
-                        {item.comment && (
-                          <span className="comment-badge" title={item.comment}>
+                        {itemHasComment && (
+                          <span className="comment-badge" title={itemCommentTitle}>
                             <MessageSquare size={10} />
                           </span>
                         )}
@@ -5310,7 +5795,7 @@ export default function Home() {
                     onClick={() => {
                       clearActiveTool();
                       setActiveHighlightColor("");
-                      setActiveToplineTag("");
+                      setMultiSelectedIds([]);
                     }}
                   >
                     <X size={16} />
@@ -5758,6 +6243,44 @@ export default function Home() {
                     ))}
                   </select>
                 </div>
+
+                {selectedTextMark &&
+                  selectedTextMark.item.id === selectedItem.id && (
+                    <div className="range-marker-tools">
+                      <label className="field-label" htmlFor="textMarkComment">
+                        選択範囲メモ
+                      </label>
+                      <p className="range-marker-preview">
+                        {selectedTextMark.text}
+                      </p>
+                      <textarea
+                        id="textMarkComment"
+                        value={selectedTextMark.mark.comment ?? ""}
+                        onChange={(event) =>
+                          updateTextMarkComment(
+                            selectedTextMark.item.id,
+                            selectedTextMark.mark.id,
+                            event.target.value
+                          )
+                        }
+                        placeholder="ハモリ位置、注意点、先生/生徒メモなど"
+                        rows={3}
+                      />
+                      <button
+                        type="button"
+                        className="control-button danger"
+                        onClick={() =>
+                          removeTextMark(
+                            selectedTextMark.item.id,
+                            selectedTextMark.mark.id
+                          )
+                        }
+                      >
+                        <Trash2 size={16} />
+                        <span>この範囲マークを削除</span>
+                      </button>
+                    </div>
+                  )}
 
                 <label className="field-label" htmlFor="itemSize">
                   サイズ

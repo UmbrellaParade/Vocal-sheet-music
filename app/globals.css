@@ -1321,6 +1321,33 @@ kbd {
   width: 100%;
 }
 
+.sheet-text.range-markable {
+  cursor: text;
+  touch-action: auto;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.sheet-text.range-markable .lyric-selectable-text {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.lyric-text-mark {
+  border-radius: 3px;
+  padding: 0 1px;
+  background: var(--range-highlight-color);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.lyric-text-mark.has-comment {
+  text-decoration: underline;
+  text-decoration-color: rgba(14, 116, 144, 0.85);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+
 .sheet-text.has-highlight {
   padding: 1px 5px;
   border-radius: 4px;
@@ -1536,6 +1563,27 @@ kbd {
   display: grid;
   gap: 4px;
   margin: 4px 0 8px;
+}
+
+.range-marker-tools {
+  display: grid;
+  gap: 6px;
+  margin: 6px 0 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.range-marker-preview {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  color: #0f172a;
+  background: #fff7ed;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.45;
 }
 
 .chord-presets,
