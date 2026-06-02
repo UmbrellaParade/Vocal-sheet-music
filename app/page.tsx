@@ -108,6 +108,7 @@ type SheetItem = {
   size: number;
   color: string;
   highlightColor?: string;
+  toplineTag?: string; // トップラインアレンジタグ（1文字1タグ）
   comment?: string;
   pitch?: number;
   durationTicks?: number;
@@ -1811,6 +1812,10 @@ export default function Home() {
   const [items, setItems] = useState<SheetItem[]>([]);
   const [activeTool, setActiveTool] = useState<ToolId | "">("");
   const [activeHighlightColor, setActiveHighlightColor] = useState<string>("");
+  const [activeToplineTag, setActiveToplineTag] = useState<string>("");
+  // ドラッグ選択（マーキング用）
+  const [multiSelectedIds, setMultiSelectedIds] = useState<string[]>([]);
+  const [dragSelect, setDragSelect] = useState<{ pointerId: number } | null>(null);
   const [toolPanelCategory, setToolPanelCategory] = useState<ToolCategory>("vocal");
   const [selectedId, setSelectedId] = useState<string>("");
   const [editingItemId, setEditingItemId] = useState<string>("");
@@ -2089,7 +2094,8 @@ export default function Home() {
         roughHiragana(originalLabel, readingCorrectionEntries);
       const vowelLabel = item.vowelLabel ?? fallback?.vowel ?? toVowels(readingLabel);
 
-      if (lyricDisplayMode === "reading") {
+      // topline はひらがな表示（ボーカル記号の位置と合わせるため）
+      if (lyricDisplayMode === "reading" || lyricDisplayMode === "topline") {
         return readingLabel;
       }
 
@@ -2275,14 +2281,51 @@ export default function Home() {
   // ハイライト色を選択（同じ色で再クリックするとOFF）
   const selectHighlightColor = useCallback(
     (color: string) => {
+      // 選択済みアイテムがある場合 → 全部に色を適用して選択解除
+      if (multiSelectedIds.length > 0 && color !== "clear") {
+        setItems((current) =>
+          current.map((item) =>
+            multiSelectedIds.includes(item.id)
+              ? { ...item, highlightColor: color }
+              : item
+          )
+        );
+        setMultiSelectedIds([]);
+        setStatus(`${multiSelectedIds.length}文字にマーキングしました`);
+        return;
+      }
       const next = activeHighlightColor === color ? "" : color;
       setActiveHighlightColor(next);
       setActiveTool("");
       setSelectedId("");
       setEditingItemId("");
-      setStatus(next ? "マーキングモード ON" : "マーキングモード OFF");
+      setMultiSelectedIds([]);
+      setStatus(next ? "マーキングモード ON（ドラッグで範囲選択）" : "マーキングモード OFF");
     },
-    [activeHighlightColor]
+    [activeHighlightColor, multiSelectedIds]
+  );
+
+  // トップラインタグを選択済みアイテム全体に適用
+  const applyToplineTagToSelection = useCallback(
+    (tagId: string) => {
+      if (multiSelectedIds.length === 0) {
+        setActiveToplineTag(activeToplineTag === tagId ? "" : tagId);
+        return;
+      }
+      // 選択済みアイテムにタグを適用（同じタグなら解除）
+      const firstItem = items.find((item) => item.id === multiSelectedIds[0]);
+      const alreadyHasTag = firstItem?.toplineTag === tagId;
+      setItems((current) =>
+        current.map((item) =>
+          multiSelectedIds.includes(item.id)
+            ? { ...item, toplineTag: alreadyHasTag ? undefined : tagId }
+            : item
+        )
+      );
+      setMultiSelectedIds([]);
+      setStatus(`${multiSelectedIds.length}文字にタグを付けました`);
+    },
+    [activeToplineTag, items, multiSelectedIds]
   );
 
   const selectTool = useCallback(
@@ -3249,6 +3292,40 @@ export default function Home() {
     };
   }, [replaceAudioSource]);
 
+  // ドラッグ選択（マーキング・トップラインタグ用）
+  useEffect(() => {
+    if (!dragSelect) {
+      return;
+    }
+
+    const handlePointerMove = (event: PointerEvent) => {
+      if (event.pointerId !== dragSelect.pointerId) {
+        return;
+      }
+      // ポインター下にある data-item-id 要素を探して選択に追加
+      const el = document.elementFromPoint(event.clientX, event.clientY);
+      const itemEl = el?.closest("[data-item-id]");
+      const itemId = itemEl?.getAttribute("data-item-id");
+      if (itemId) {
+        setMultiSelectedIds((prev) =>
+          prev.includes(itemId) ? prev : [...prev, itemId]
+        );
+      }
+    };
+
+    const handlePointerUp = () => {
+      setDragSelect(null);
+      // multiSelectedIds は保持（ユーザーが色/タグを選ぶまで）
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp, { once: true });
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [dragSelect]);
+
   useEffect(() => {
     if (!dragging) {
       return;
@@ -3395,8 +3472,8 @@ export default function Home() {
       return;
     }
 
-    // ハイライトモード中は空白クリックで何もしない
-    if (activeHighlightColor) {
+    // ハイライト / トップラインタグモード中は空白クリックで何もしない
+    if (activeHighlightColor || activeToplineTag) {
       return;
     }
 
@@ -3494,17 +3571,20 @@ export default function Home() {
   ) => {
     event.stopPropagation();
 
-    // ハイライトモードがONのとき → 歌詞アイテムに色を塗る（ドラッグ・選択はしない）
-    if (activeHighlightColor && isSheetLyricItem(item)) {
+    // マーキング / トップラインタグモード → ドラッグ選択を開始
+    if ((activeHighlightColor || activeToplineTag) && isSheetLyricItem(item)) {
+      // 消しゴムモードは即時適用（ドラッグ不要）
       if (activeHighlightColor === "clear") {
-        // 消しゴムモード：ハイライトだけ解除（アイテムは消えない）
         updateItem(item.id, { highlightColor: "" });
-      } else {
-        // 同じ色をもう一度タップするとハイライト解除
-        const next =
-          item.highlightColor === activeHighlightColor ? "" : activeHighlightColor;
-        updateItem(item.id, { highlightColor: next });
+        return;
       }
+      if (activeToplineTag === "clear") {
+        updateItem(item.id, { toplineTag: undefined });
+        return;
+      }
+      // ドラッグ選択開始：先頭アイテムを選択リストに追加
+      setMultiSelectedIds([item.id]);
+      setDragSelect({ pointerId: event.pointerId });
       return;
     }
 
@@ -5185,8 +5265,9 @@ export default function Home() {
                     return (
                       <button
                         key={item.id}
+                        data-item-id={item.id}
                         type="button"
-                        className={sheetItemClassName}
+                        className={`${sheetItemClassName}${multiSelectedIds.includes(item.id) ? " drag-selected" : ""}`}
                         style={itemStyle}
                         onPointerDown={(event) => handleItemPointerDown(event, item)}
                         onDoubleClick={() => {
@@ -5212,6 +5293,21 @@ export default function Home() {
                             <MessageSquare size={10} />
                           </span>
                         )}
+                        {/* トップラインタグ（1文字1タグ、トップラインモード時に表示） */}
+                        {lyricDisplayMode === "topline" &&
+                          isSheetLyricItem(item) &&
+                          item.toplineTag && (() => {
+                            const tag = TOPLINE_TAG_OPTIONS.find((t) => t.id === item.toplineTag);
+                            return tag ? (
+                              <span
+                                className="topline-item-tag-chip"
+                                style={{ background: tag.color }}
+                                title={tag.label}
+                              >
+                                {tag.label}
+                              </span>
+                            ) : null;
+                          })()}
                       </button>
                     );
                   })}
@@ -5287,49 +5383,99 @@ export default function Home() {
               <>
                 {/* マーキング（ハイライトペン）パレット */}
                 <div className="highlight-palette-row">
-                  <span className="highlight-palette-label">マーキング</span>
-                  <div className="highlight-palette-swatches">
-                    {HIGHLIGHT_SWATCHES.map((color) => (
-                      <button
-                        key={color}
-                        type="button"
-                        className={`highlight-pen-button ${activeHighlightColor === color ? "active" : ""}`}
-                        style={{ backgroundColor: color }}
-                        onClick={() => selectHighlightColor(color)}
-                        title={`マーキング: ${color}`}
-                        aria-pressed={activeHighlightColor === color}
-                      />
-                    ))}
-                    {/* 消しゴム：タップするだけでハイライト解除（アイテムは消えない） */}
-                    <button
-                      type="button"
-                      className={`highlight-pen-button highlight-eraser ${activeHighlightColor === "clear" ? "active" : ""}`}
-                      onClick={() => selectHighlightColor("clear")}
-                      title="消しゴム（ハイライトだけ解除）"
-                      aria-pressed={activeHighlightColor === "clear"}
-                    >
-                      <Eraser size={13} />
-                    </button>
-                    {activeHighlightColor && (
-                      <button
-                        type="button"
-                        className="highlight-pen-clear"
-                        onClick={() => setActiveHighlightColor("")}
-                        title="マーキングモード終了"
-                      >
-                        <X size={13} />
-                      </button>
-                    )}
-                  </div>
+                  {lyricDisplayMode === "topline" ? (
+                    /* トップラインモード：アレンジタグパレット */
+                    <>
+                      <span className="highlight-palette-label">タグ付け</span>
+                      <div className="highlight-palette-swatches topline-tag-palette">
+                        {TOPLINE_TAG_OPTIONS.map((tag) => (
+                          <button
+                            key={tag.id}
+                            type="button"
+                            className={`topline-tag-toggle ${activeToplineTag === tag.id ? "active" : ""}`}
+                            style={
+                              activeToplineTag === tag.id
+                                ? { background: tag.color, color: "#fff", borderColor: tag.color }
+                                : { borderColor: tag.color, color: tag.color }
+                            }
+                            onClick={() => applyToplineTagToSelection(tag.id)}
+                            title={tag.label}
+                          >
+                            {tag.label}
+                          </button>
+                        ))}
+                        <button
+                          type="button"
+                          className={`highlight-pen-button highlight-eraser ${activeToplineTag === "clear" ? "active" : ""}`}
+                          onClick={() =>
+                            setActiveToplineTag(
+                              activeToplineTag === "clear" ? "" : "clear"
+                            )
+                          }
+                          title="タグ消しゴム"
+                        >
+                          <Eraser size={13} />
+                        </button>
+                        {activeToplineTag && (
+                          <button
+                            type="button"
+                            className="highlight-pen-clear"
+                            onClick={() => setActiveToplineTag("")}
+                            title="タグ付けモード終了"
+                          >
+                            <X size={13} />
+                          </button>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    /* 通常モード：マーキングパレット */
+                    <>
+                      <span className="highlight-palette-label">マーキング</span>
+                      <div className="highlight-palette-swatches">
+                        {HIGHLIGHT_SWATCHES.map((color) => (
+                          <button
+                            key={color}
+                            type="button"
+                            className={`highlight-pen-button ${activeHighlightColor === color ? "active" : ""}`}
+                            style={{ backgroundColor: color }}
+                            onClick={() => selectHighlightColor(color)}
+                            title={`マーキング: ${color}`}
+                            aria-pressed={activeHighlightColor === color}
+                          />
+                        ))}
+                        <button
+                          type="button"
+                          className={`highlight-pen-button highlight-eraser ${activeHighlightColor === "clear" ? "active" : ""}`}
+                          onClick={() => selectHighlightColor("clear")}
+                          title="消しゴム（ハイライトだけ解除）"
+                          aria-pressed={activeHighlightColor === "clear"}
+                        >
+                          <Eraser size={13} />
+                        </button>
+                        {activeHighlightColor && (
+                          <button
+                            type="button"
+                            className="highlight-pen-clear"
+                            onClick={() => setActiveHighlightColor("")}
+                            title="マーキングモード終了"
+                          >
+                            <X size={13} />
+                          </button>
+                        )}
+                      </div>
+                    </>
+                  )}
                 </div>
 
-                {(activeToolSpec || activeHighlightColor) && (
+                {(activeToolSpec || activeHighlightColor || activeToplineTag) && (
                   <button
                     type="button"
                     className="tool-clear-button"
                     onClick={() => {
                       clearActiveTool();
                       setActiveHighlightColor("");
+                      setActiveToplineTag("");
                     }}
                   >
                     <X size={16} />

@@ -913,6 +913,34 @@ kbd {
   line-height: 1.4;
 }
 
+/* ── ドラッグ選択中の文字ハイライト ── */
+.sheet-item.drag-selected {
+  outline: 2px solid #3b82f6 !important;
+  outline-offset: 1px;
+  background: rgba(59, 130, 246, 0.15) !important;
+}
+
+/* ── トップラインタグチップ（文字の下） ── */
+.topline-item-tag-chip {
+  position: absolute;
+  bottom: -11px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0 3px;
+  border-radius: 3px;
+  font-size: 8px;
+  font-weight: 800;
+  color: #fff;
+  white-space: nowrap;
+  pointer-events: none;
+  line-height: 1.5;
+}
+
+.topline-tag-palette {
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
 /* ── トップラインタグ編集パネル ── */
 
 .topline-tag-panel .section-heading {
