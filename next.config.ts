@@ -4,6 +4,9 @@ const isGitHubPages = process.env.GITHUB_PAGES === "true";
 const repositoryBasePath = "/Vocal-sheet-music";
 
 const nextConfig: NextConfig = {
+  env: {
+    NEXT_PUBLIC_BASE_PATH: isGitHubPages ? repositoryBasePath : ""
+  },
   ...(isGitHubPages
     ? {
         output: "export" as const,

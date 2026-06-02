@@ -40,7 +40,7 @@ import {
   useState
 } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
-import { roughHiragana, toVowels } from "@/lib/japanese";
+import { normalizeForSinging, roughHiragana, toVowels } from "@/lib/japanese";
 
 type ToolId =
   | "lyric"
@@ -150,6 +150,14 @@ type ReadingResult = {
   source: string;
 };
 
+type BrowserKuroshiroConverter = {
+  init: (analyzer: unknown) => Promise<void>;
+  convert: (
+    text: string,
+    options: { to: "hiragana"; mode: "normal" }
+  ) => Promise<string>;
+};
+
 type ParsedMidiNote = {
   pitch: number;
   velocity: number;
@@ -193,6 +201,12 @@ type PanelId =
   | "cleanup";
 
 const STORAGE_KEY = "vocal-sheet-music:draft:v1";
+
+const APP_BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+const KUROMOJI_DICT_PATH = `${APP_BASE_PATH}/kuromoji/`;
+
+let browserReadingConverterPromise: Promise<BrowserKuroshiroConverter> | null =
+  null;
 
 const DEFAULT_META: SheetMeta = {
   title: "新しい歌唱譜",
@@ -655,6 +669,33 @@ function decodeShareData(payload: string) {
   return JSON.parse(new TextDecoder().decode(bytes)) as Partial<DraftData>;
 }
 
+async function getBrowserReadingConverter() {
+  if (!browserReadingConverterPromise) {
+    browserReadingConverterPromise = (async () => {
+      const [{ default: Kuroshiro }, { default: KuromojiAnalyzer }] =
+        await Promise.all([
+          import("kuroshiro"),
+          import("kuroshiro-analyzer-kuromoji")
+        ]);
+      const converter = new Kuroshiro() as BrowserKuroshiroConverter;
+      await converter.init(new KuromojiAnalyzer({ dictPath: KUROMOJI_DICT_PATH }));
+      return converter;
+    })();
+  }
+
+  return browserReadingConverterPromise;
+}
+
+async function convertWithBrowserKuromoji(text: string) {
+  const converter = await getBrowserReadingConverter();
+  const reading = await converter.convert(text, {
+    to: "hiragana",
+    mode: "normal"
+  });
+
+  return normalizeForSinging(reading);
+}
+
 function normalizeDigits(value: string) {
   return value.replace(/[０-９]/g, (character) =>
     String.fromCharCode(character.charCodeAt(0) - 0xfee0)
@@ -788,7 +829,7 @@ function getSectionLabelFromHeading(line: string) {
 
   match = key.match(/^verse(\d*)$/);
   if (match) {
-    return `Aメロ${match[1] || "1"}`;
+    return `Aメロ${match[1] || ""}`;
   }
 
   match = key.match(/^prechorus(\d*)$/);
@@ -821,9 +862,52 @@ function getSectionLabelFromHeading(line: string) {
   return "";
 }
 
+function getImplicitNumberBase(label: string) {
+  const match = compactSectionKey(label).match(/^(aメロ|bメロ|cメロ|dメロ|サビ)(\d*)$/);
+  return match?.[2] ? "" : match?.[1] ?? "";
+}
+
+function getExplicitSectionNumber(label: string) {
+  const match = compactSectionKey(label).match(/^(aメロ|bメロ|cメロ|dメロ|サビ)(\d+)$/);
+  return match ? Number(match[2]) : 0;
+}
+
+function applyImplicitSectionNumber(
+  label: string,
+  counters: Record<string, number>
+) {
+  const explicitNumber = getExplicitSectionNumber(label);
+  const exactBase = getImplicitNumberBase(label);
+
+  if (explicitNumber > 0) {
+    const base = getSectionBaseKey(label);
+    counters[base] = Math.max(counters[base] ?? 0, explicitNumber);
+    return label;
+  }
+
+  if (!exactBase) {
+    return label;
+  }
+
+  counters[exactBase] = (counters[exactBase] ?? 0) + 1;
+  const displayBase =
+    exactBase === "aメロ"
+      ? "Aメロ"
+      : exactBase === "bメロ"
+        ? "Bメロ"
+        : exactBase === "cメロ"
+          ? "Cメロ"
+          : exactBase === "dメロ"
+            ? "Dメロ"
+            : "サビ";
+
+  return `${displayBase}${counters[exactBase]}`;
+}
+
 function parseSectionedLyrics(input: string) {
   const blocks: LyricSectionBlock[] = [];
   const preHeadingLines: string[] = [];
+  const sectionCounters: Record<string, number> = {};
   let currentBlock: LyricSectionBlock | null = null;
   let foundHeading = false;
 
@@ -833,8 +917,12 @@ function parseSectionedLyrics(input: string) {
       return;
     }
 
-    const sectionLabel = getSectionLabelFromHeading(line);
-    if (sectionLabel) {
+    const rawSectionLabel = getSectionLabelFromHeading(line);
+    if (rawSectionLabel) {
+      const sectionLabel = applyImplicitSectionNumber(
+        rawSectionLabel,
+        sectionCounters
+      );
       if (currentBlock) {
         blocks.push(currentBlock);
       } else if (preHeadingLines.length > 0) {
@@ -1721,17 +1809,32 @@ export default function Home() {
       return { reading: "", source: "empty" };
     }
 
-    try {
-      const response = await fetch("/api/reading", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text })
-      });
+    if (!APP_BASE_PATH) {
+      try {
+        const response = await fetch("/api/reading", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text })
+        });
 
-      const data = (await response.json()) as Partial<ReadingResult>;
+        if (response.ok) {
+          const data = (await response.json()) as Partial<ReadingResult>;
+          if (data.reading?.trim()) {
+            return {
+              reading: data.reading,
+              source: data.source ?? "kuromoji"
+            };
+          }
+        }
+      } catch {
+        // Fall through to the browser-side converter.
+      }
+    }
+
+    try {
       return {
-        reading: data.reading ?? roughHiragana(text),
-        source: data.source ?? "fallback"
+        reading: await convertWithBrowserKuromoji(text),
+        source: "browser-kuromoji"
       };
     } catch {
       return {
@@ -1759,9 +1862,11 @@ export default function Home() {
         reading: convertedBlocks
           .map((block) => `${block.label}\n${block.reading}`)
           .join("\n"),
-        source: convertedBlocks.some((block) => block.source !== "kuromoji")
+        source: convertedBlocks.some((block) => block.source === "fallback")
           ? "fallback"
-          : "kuromoji"
+          : convertedBlocks.some((block) => block.source === "browser-kuromoji")
+            ? "browser-kuromoji"
+            : "kuromoji"
       };
     },
     [requestReading]
@@ -1866,7 +1971,11 @@ export default function Home() {
     try {
       const data = await convertTextToReadingPreservingSections(sourceLyrics);
       setReadingLyrics(data.reading);
-      setStatus(data.source === "kuromoji" ? "変換しました" : "簡易変換しました");
+      setStatus(
+        data.source === "kuromoji" || data.source === "browser-kuromoji"
+          ? "変換しました"
+          : "簡易変換しました"
+      );
     } catch {
       setReadingLyrics(roughHiragana(sourceLyrics));
       setStatus("簡易変換しました");
