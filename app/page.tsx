@@ -106,6 +106,7 @@ type SheetItem = {
   label: string;
   originalLabel?: string;
   readingLabel?: string;
+  readingLabelEdited?: boolean;
   vowelLabel?: string;
   x: number;
   y: number;
@@ -1347,6 +1348,165 @@ function updateReadingLyricsLine(text: string, targetIndex: number, newValue: st
   }
 
   return text; // 対応行が見つからない場合はそのまま返す
+}
+
+function getLyricItemRowGroups(items: SheetItem[]) {
+  const rowMap = new Map<number, SheetItem[]>();
+
+  items
+    .filter((item) => item.toolId === "lyric")
+    .forEach((item) => {
+      const rowIndex = getItemGlobalRowIndex(item);
+      rowMap.set(rowIndex, [...(rowMap.get(rowIndex) ?? []), item]);
+    });
+
+  return Array.from(rowMap.entries())
+    .sort(([rowA], [rowB]) => rowA - rowB)
+    .map(([, rowItems]) => rowItems.slice().sort((a, b) => a.x - b.x));
+}
+
+function splitReadingTokens(line: string) {
+  const tokens = line.split(/[ \u3000]+/).filter(Boolean);
+  return tokens.length > 1 ? tokens : [line];
+}
+
+function getReadingLabelUpdatesFromText(items: SheetItem[], readingText: string) {
+  const readingLines = flattenLyricLines(readingText);
+  const updates = new Map<string, string>();
+
+  getLyricItemRowGroups(items).forEach((rowItems, lineIndex) => {
+    const readingLine = readingLines[lineIndex];
+    if (readingLine == null) {
+      return;
+    }
+
+    if (rowItems.length <= 1) {
+      updates.set(rowItems[0].id, readingLine);
+      return;
+    }
+
+    const tokens = splitReadingTokens(readingLine);
+    if (tokens.length !== rowItems.length) {
+      return;
+    }
+
+    rowItems.forEach((item, index) => {
+      updates.set(item.id, tokens[index]);
+    });
+  });
+
+  return updates;
+}
+
+function applyReadingTextToLyricItems(
+  items: SheetItem[],
+  readingText: string,
+  markAsEdited: boolean
+) {
+  const updates = getReadingLabelUpdatesFromText(items, readingText);
+
+  if (updates.size === 0) {
+    return items;
+  }
+
+  return items.map((item) => {
+    const readingLabel = updates.get(item.id);
+    if (item.toolId !== "lyric" || readingLabel == null) {
+      return item;
+    }
+
+    if (!markAsEdited && item.readingLabelEdited) {
+      return item;
+    }
+
+    const readingChanged = item.readingLabel !== readingLabel;
+
+    return {
+      ...item,
+      readingLabel,
+      readingLabelEdited: markAsEdited
+        ? Boolean(item.readingLabelEdited || readingChanged)
+        : item.readingLabelEdited,
+      vowelLabel: toVowels(readingLabel)
+    };
+  });
+}
+
+function getReadingLineEditForItem(
+  items: SheetItem[],
+  itemId: string,
+  nextLabel: string
+) {
+  const rowGroups = getLyricItemRowGroups(items);
+
+  for (let lineIndex = 0; lineIndex < rowGroups.length; lineIndex += 1) {
+    const rowItems = rowGroups[lineIndex];
+    const itemIndex = rowItems.findIndex((item) => item.id === itemId);
+
+    if (itemIndex < 0) {
+      continue;
+    }
+
+    if (rowItems.length <= 1) {
+      return { lineIndex, value: nextLabel };
+    }
+
+    return {
+      lineIndex,
+      value: rowItems
+        .map((item) =>
+          item.id === itemId
+            ? nextLabel
+            : item.readingLabel ?? item.originalLabel ?? item.label
+        )
+        .join(" ")
+    };
+  }
+
+  return null;
+}
+
+function buildReadingConversionMerge(
+  items: SheetItem[],
+  convertedReadingText: string,
+  corrections: ReturnType<typeof parseReadingCorrections>
+) {
+  const convertedUpdates = getReadingLabelUpdatesFromText(
+    items,
+    convertedReadingText
+  );
+  const labelsById = new Map<string, string>();
+  const editedIds = new Set<string>();
+  let mergedText = convertedReadingText;
+
+  getLyricItemRowGroups(items).forEach((rowItems, lineIndex) => {
+    if (rowItems.length === 0) {
+      return;
+    }
+
+    const rowLabels = rowItems.map((item) => {
+      const convertedLabel =
+        convertedUpdates.get(item.id) ??
+        roughHiragana(item.originalLabel ?? item.label, corrections);
+      const shouldPreserve = Boolean(item.readingLabelEdited && item.readingLabel);
+      const nextLabel = shouldPreserve ? item.readingLabel! : convertedLabel;
+
+      labelsById.set(item.id, nextLabel);
+      if (shouldPreserve) {
+        editedIds.add(item.id);
+      }
+
+      return nextLabel;
+    });
+
+    mergedText = updateReadingLyricsLine(
+      mergedText,
+      lineIndex,
+      rowItems.length === 1 ? rowLabels[0] : rowLabels.join(" ")
+    );
+  });
+
+  return { text: mergedText, labelsById, editedIds };
 }
 
 function convertSectionedTextToVowels(input: string) {
@@ -2606,12 +2766,19 @@ export default function Home() {
   );
 
   const hydrateDraft = useCallback((nextDraft: Partial<DraftData>) => {
+    const nextReadingLyrics = nextDraft.readingLyrics ?? "";
+    const nextItems = Array.isArray(nextDraft.items)
+      ? normalizeDraftItems(nextDraft.items)
+      : [];
+
     setMeta({ ...DEFAULT_META, ...(nextDraft.meta ?? {}) });
     setItems(
-      Array.isArray(nextDraft.items) ? normalizeDraftItems(nextDraft.items) : []
+      nextReadingLyrics.trim()
+        ? applyReadingTextToLyricItems(nextItems, nextReadingLyrics, false)
+        : nextItems
     );
     setSourceLyrics(nextDraft.sourceLyrics ?? "");
-    setReadingLyrics(nextDraft.readingLyrics ?? "");
+    setReadingLyrics(nextReadingLyrics);
     setReadingCorrections(nextDraft.readingCorrections ?? "");
     setVowelLyrics(nextDraft.vowelLyrics ?? "");
     setSections(normalizeSections(nextDraft.sections));
@@ -3128,6 +3295,7 @@ export default function Home() {
             return {
               ...item,
               readingLabel: label,
+              readingLabelEdited: true,
               vowelLabel: toVowels(label)
             };
           }
@@ -3144,6 +3312,7 @@ export default function Home() {
             label,
             originalLabel: label,
             readingLabel,
+            readingLabelEdited: false,
             vowelLabel: toVowels(readingLabel)
           };
         })
@@ -3151,24 +3320,24 @@ export default function Home() {
 
       // ひらがなモードで編集した場合、左パネルの「読み」テキストも同期する
       if (lyricDisplayMode === "reading") {
-        const sortedLyricItems = items
-          .filter((item) => item.toolId === "lyric")
-          .slice()
-          .sort(
-            (a, b) =>
-              getItemGlobalRowIndex(a) - getItemGlobalRowIndex(b) || a.x - b.x
-          );
-        const itemIndex = sortedLyricItems.findIndex((item) => item.id === id);
+        const edit = getReadingLineEditForItem(items, id, label);
 
-        if (itemIndex >= 0) {
+        if (edit) {
           setReadingLyrics((prev) =>
-            updateReadingLyricsLine(prev, itemIndex, label)
+            updateReadingLyricsLine(prev, edit.lineIndex, edit.value)
           );
         }
       }
     },
     [items, lyricDisplayMode, readingCorrectionEntries]
   );
+
+  const updateReadingLyricsText = useCallback((value: string) => {
+    setReadingLyrics(value);
+    setItems((current) =>
+      applyReadingTextToLyricItems(current, value, true)
+    );
+  }, []);
 
   const selectedTextMark = useMemo(() => {
     if (!selectedTextMarkRef) {
@@ -3408,6 +3577,7 @@ export default function Home() {
             label,
             originalLabel: toolId === "lyric" ? label : undefined,
             readingLabel: toolId === "lyric" ? reading : undefined,
+            readingLabelEdited: toolId === "lyric" ? false : undefined,
             vowelLabel: toolId === "lyric" ? toVowels(reading) : undefined,
             x: LYRIC_LINE_X + LYRIC_LINE_WIDTH / 2,
             y: yPos,
@@ -3435,6 +3605,7 @@ export default function Home() {
             label: token,
             originalLabel: toolId === "lyric" ? token : undefined,
             readingLabel: toolId === "lyric" ? reading : undefined,
+            readingLabelEdited: toolId === "lyric" ? false : undefined,
             vowelLabel: toolId === "lyric" ? vowel : undefined,
             x,
             y: yPos,
@@ -3597,43 +3768,75 @@ export default function Home() {
     try {
       const data = await convertTextToReadingPreservingSections(sourceLyrics);
 
-      // 譜面上で手動修正済みの readingLabel を新しい変換結果にマージする
-      // （手動修正した行はそのまま保持、未修正行は新しい変換結果を使う）
-      const sortedLyricItems = items
-        .filter((item) => item.toolId === "lyric")
-        .slice()
-        .sort(
-          (a, b) =>
-            getItemGlobalRowIndex(a) - getItemGlobalRowIndex(b) || a.x - b.x
-        );
-
-      let mergedReading = data.reading;
-      sortedLyricItems.forEach((item, index) => {
-        if (item.readingLabel != null) {
-          mergedReading = updateReadingLyricsLine(
-            mergedReading,
-            index,
-            item.readingLabel
-          );
-        }
-      });
-
-      setReadingLyrics(mergedReading);
-      // readingLabel をクリアして readingLyrics を正とする
-      setItems((current) =>
-        current.map((item) =>
-          item.toolId === "lyric"
-            ? { ...item, readingLabel: undefined, vowelLabel: undefined }
-            : item
-        )
+      const mergedReading = buildReadingConversionMerge(
+        items,
+        data.reading,
+        readingCorrectionEntries
       );
+
+      setReadingLyrics(mergedReading.text);
+      setItems((current) => {
+        const currentMerge =
+          current === items
+            ? mergedReading
+            : buildReadingConversionMerge(
+                current,
+                data.reading,
+                readingCorrectionEntries
+              );
+
+        return current.map((item) => {
+          const readingLabel = currentMerge.labelsById.get(item.id);
+          if (item.toolId !== "lyric" || readingLabel == null) {
+            return item;
+          }
+
+          return {
+            ...item,
+            readingLabel,
+            readingLabelEdited: currentMerge.editedIds.has(item.id),
+            vowelLabel: toVowels(readingLabel)
+          };
+        });
+      });
       setStatus(
         data.source === "kuromoji" || data.source === "browser-kuromoji"
           ? "変換しました"
           : "簡易変換しました"
       );
     } catch {
-      setReadingLyrics(roughHiragana(sourceLyrics, readingCorrectionEntries));
+      const fallbackReading = roughHiragana(sourceLyrics, readingCorrectionEntries);
+      const mergedReading = buildReadingConversionMerge(
+        items,
+        fallbackReading,
+        readingCorrectionEntries
+      );
+
+      setReadingLyrics(mergedReading.text);
+      setItems((current) => {
+        const currentMerge =
+          current === items
+            ? mergedReading
+            : buildReadingConversionMerge(
+                current,
+                fallbackReading,
+                readingCorrectionEntries
+              );
+
+        return current.map((item) => {
+          const readingLabel = currentMerge.labelsById.get(item.id);
+          if (item.toolId !== "lyric" || readingLabel == null) {
+            return item;
+          }
+
+          return {
+            ...item,
+            readingLabel,
+            readingLabelEdited: currentMerge.editedIds.has(item.id),
+            vowelLabel: toVowels(readingLabel)
+          };
+        });
+      });
       setStatus("簡易変換しました");
     } finally {
       setIsConverting(false);
@@ -3762,6 +3965,7 @@ export default function Home() {
             label: char,
             originalLabel: char,
             readingLabel,
+            readingLabelEdited: false,
             vowelLabel,
             x,
             width: undefined,
@@ -5038,7 +5242,7 @@ export default function Home() {
                   id="readingLyrics"
                   className="lyrics-textarea reading-lyrics-textarea"
                   value={readingLyrics}
-                  onChange={(event) => setReadingLyrics(event.target.value)}
+                  onChange={(event) => updateReadingLyricsText(event.target.value)}
                   rows={12}
                 />
                 <button
