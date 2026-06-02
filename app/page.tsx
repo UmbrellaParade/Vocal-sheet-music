@@ -79,6 +79,7 @@ type SheetItem = {
   label: string;
   x: number;
   y: number;
+  pageIndex?: number;
   size: number;
   color: string;
   highlightColor?: string;
@@ -405,6 +406,10 @@ const SYSTEMS = [
   { top: 81.2, height: 9.8 }
 ];
 
+const ROWS_PER_PAGE = SYSTEMS.length;
+const MAX_SHEET_PAGES = 12;
+const MAX_SHEET_ROWS = ROWS_PER_PAGE * MAX_SHEET_PAGES;
+
 const LYRIC_LINE_X = 18;
 const LYRIC_LINE_WIDTH = 70;
 
@@ -633,15 +638,40 @@ function getAutoScrollProgress(
 }
 
 function getSectionStartRow(section: SectionEntry) {
-  return clamp(section.startRow ?? section.rowIndex ?? 0, 0, SYSTEMS.length - 1);
+  return clamp(section.startRow ?? section.rowIndex ?? 0, 0, MAX_SHEET_ROWS - 1);
 }
 
 function getSectionEndRow(section: SectionEntry) {
   return clamp(
     section.endRow ?? section.startRow ?? section.rowIndex ?? 0,
     0,
-    SYSTEMS.length - 1
+    MAX_SHEET_ROWS - 1
   );
+}
+
+function getRowPageIndex(rowIndex: number) {
+  return Math.floor(clamp(rowIndex, 0, MAX_SHEET_ROWS - 1) / ROWS_PER_PAGE);
+}
+
+function getRowLocalIndex(rowIndex: number) {
+  return clamp(rowIndex, 0, MAX_SHEET_ROWS - 1) % ROWS_PER_PAGE;
+}
+
+function getSystemForRow(rowIndex: number) {
+  return SYSTEMS[getRowLocalIndex(rowIndex)] ?? SYSTEMS[0];
+}
+
+function getItemPageIndex(item: SheetItem) {
+  const pageIndex = Number.isFinite(item.pageIndex) ? item.pageIndex ?? 0 : 0;
+  return clamp(Math.floor(pageIndex), 0, MAX_SHEET_PAGES - 1);
+}
+
+function getItemGlobalRowIndex(item: SheetItem) {
+  const localRowIndex = SYSTEMS.findIndex(
+    (system) => item.y >= system.top && item.y <= system.top + system.height
+  );
+
+  return getItemPageIndex(item) * ROWS_PER_PAGE + Math.max(localRowIndex, 0);
 }
 
 function normalizeSections(sections: SectionEntry[] | undefined) {
@@ -1000,14 +1030,14 @@ function createSectionsFromLyricBlocks(
   let nextRow = 0;
 
   blocks.forEach((block, index) => {
-    if (nextRow >= SYSTEMS.length) {
+    if (nextRow >= MAX_SHEET_ROWS) {
       return;
     }
 
     const matchedSection = findMatchingSection(block.label, existingSections);
     const rowsNeeded = Math.max(block.lines.length, 1);
     const startRow = nextRow;
-    const endRow = Math.min(SYSTEMS.length - 1, startRow + rowsNeeded - 1);
+    const endRow = Math.min(MAX_SHEET_ROWS - 1, startRow + rowsNeeded - 1);
 
     nextSections.push({
       id: matchedSection?.id ?? createId(),
@@ -1147,7 +1177,7 @@ function midiPitchName(pitch: number) {
 }
 
 function midiPitchToStaffY(pitch: number, rowIndex: number) {
-  const system = SYSTEMS[rowIndex] ?? SYSTEMS[0];
+  const system = getSystemForRow(rowIndex);
   const staffTop = system.top + system.height * 0.35;
   const staffHeight = system.height * 0.32;
   const pitchClass = pitch % 12;
@@ -1336,16 +1366,18 @@ function normalizeDraftItems(items: SheetItem[]) {
   return items.map((item) => {
     const tool = TOOL_BY_ID[item.toolId];
     const legacySymbolSize = LEGACY_SYMBOL_SIZE_BY_ID[item.toolId];
+    const pageIndex = getItemPageIndex(item);
+    const normalizedItem = { ...item, pageIndex };
 
     if (
       tool?.kind === "symbol" &&
       legacySymbolSize &&
       item.size === legacySymbolSize
     ) {
-      return { ...item, size: tool.size };
+      return { ...normalizedItem, size: tool.size };
     }
 
-    return item;
+    return normalizedItem;
   });
 }
 
@@ -1472,6 +1504,7 @@ export default function Home() {
   const [selectedId, setSelectedId] = useState<string>("");
   const [dragging, setDragging] = useState<{
     id: string;
+    pageIndex: number;
     offsetX: number;
     offsetY: number;
   } | null>(null);
@@ -1562,6 +1595,38 @@ export default function Home() {
 
     return rowMap;
   }, [sections]);
+
+  const sheetPageCount = useMemo(() => {
+    const maxSectionRow = normalizedSections.reduce(
+      (maxRow, section) => Math.max(maxRow, getSectionEndRow(section)),
+      0
+    );
+    const maxItemPage = items.reduce(
+      (maxPage, item) => Math.max(maxPage, getItemPageIndex(item)),
+      0
+    );
+    const rowsNeeded = Math.max(maxSectionRow, sectionEndRow, 0) + 1;
+
+    return clamp(
+      Math.max(Math.ceil(rowsNeeded / ROWS_PER_PAGE), maxItemPage + 1, 1),
+      1,
+      MAX_SHEET_PAGES
+    );
+  }, [items, normalizedSections, sectionEndRow]);
+
+  const sheetPages = useMemo(
+    () => Array.from({ length: sheetPageCount }, (_, pageIndex) => pageIndex),
+    [sheetPageCount]
+  );
+
+  const sectionRowOptions = useMemo(
+    () =>
+      Array.from(
+        { length: Math.min(sheetPageCount * ROWS_PER_PAGE, MAX_SHEET_ROWS) },
+        (_, rowIndex) => rowIndex
+      ),
+    [sheetPageCount]
+  );
 
   const pinnedDictionOptions = useMemo(
     () =>
@@ -1671,6 +1736,36 @@ export default function Home() {
     setIsAudioPlaying(false);
   }, []);
 
+  const getPointerPositionInElement = useCallback(
+    (clientX: number, clientY: number, element: HTMLElement | null) => {
+      const rect = element?.getBoundingClientRect();
+      if (!rect) {
+        return { x: 50, y: 50 };
+      }
+
+      return {
+        x: clamp(((clientX - rect.left) / rect.width) * 100, 3, 97),
+        y: clamp(((clientY - rect.top) / rect.height) * 100, 3, 97)
+      };
+    },
+    []
+  );
+
+  const getScorePageElement = useCallback((pageIndex: number) => {
+    const selector = `.score-page[data-page-index="${pageIndex}"]`;
+    return scoreStageRef.current?.querySelector<HTMLElement>(selector) ?? null;
+  }, []);
+
+  const getPointerPositionForPage = useCallback(
+    (clientX: number, clientY: number, pageIndex: number) =>
+      getPointerPositionInElement(
+        clientX,
+        clientY,
+        getScorePageElement(pageIndex) ?? sheetRef.current
+      ),
+    [getPointerPositionInElement, getScorePageElement]
+  );
+
   const getPointerPosition = useCallback((clientX: number, clientY: number) => {
     const rect = sheetRef.current?.getBoundingClientRect();
     if (!rect) {
@@ -1726,7 +1821,13 @@ export default function Home() {
   );
 
   const addItemAt = useCallback(
-    (toolId: ToolId, x: number, y: number, labelOverride?: string) => {
+    (
+      toolId: ToolId,
+      x: number,
+      y: number,
+      labelOverride?: string,
+      pageIndex = 0
+    ) => {
       const tool = TOOL_BY_ID[toolId];
       const explicitLabel = labelOverride?.trim();
       const label =
@@ -1742,6 +1843,7 @@ export default function Home() {
         label,
         x,
         y,
+        pageIndex: getItemPageIndex({ pageIndex } as SheetItem),
         size: tool.size,
         color: tool.color
       };
@@ -1936,13 +2038,14 @@ export default function Home() {
           const endRow = getSectionEndRow(section);
           block.lines.slice(0, endRow - startRow + 1).forEach((line, lineIndex) => {
             const rowIndex = startRow + lineIndex;
-            const system = SYSTEMS[rowIndex];
+            const system = getSystemForRow(rowIndex);
             placedItems.push({
               id: createId(),
               toolId,
               label: line,
               x: LYRIC_LINE_X,
               y: getLyricPlacementY(system, toolId, sheetLayoutMode),
+              pageIndex: getRowPageIndex(rowIndex),
               size: tool.size,
               color: tool.color,
               width: LYRIC_LINE_WIDTH,
@@ -1958,8 +2061,12 @@ export default function Home() {
           0
         );
         const skippedLineCount = totalLineCount - placedItems.length;
+        const pageCount = placedItems.reduce(
+          (maxPage, item) => Math.max(maxPage, getItemPageIndex(item) + 1),
+          1
+        );
         setStatus(
-          `${tool.name}をセクション別に${placedItems.length}行配置${
+          `${tool.name}をセクション別に${placedItems.length}行 / ${pageCount}ページ配置${
             skippedLineCount > 0 ? ` / 未配置${skippedLineCount}行` : ""
           }`
         );
@@ -1972,14 +2079,15 @@ export default function Home() {
         return;
       }
 
-      lines.slice(0, SYSTEMS.length).forEach((line, rowIndex) => {
-        const system = SYSTEMS[rowIndex];
+      lines.slice(0, MAX_SHEET_ROWS).forEach((line, rowIndex) => {
+        const system = getSystemForRow(rowIndex);
         placedItems.push({
           id: createId(),
           toolId,
           label: line,
           x: LYRIC_LINE_X,
           y: getLyricPlacementY(system, toolId, sheetLayoutMode),
+          pageIndex: getRowPageIndex(rowIndex),
           size: tool.size,
           color: tool.color,
           width: LYRIC_LINE_WIDTH,
@@ -1990,8 +2098,12 @@ export default function Home() {
       setItems((current) => [...current, ...placedItems]);
       setSelectedId(placedItems.at(-1)?.id ?? "");
       const skippedLineCount = lines.length - placedItems.length;
+      const pageCount = placedItems.reduce(
+        (maxPage, item) => Math.max(maxPage, getItemPageIndex(item) + 1),
+        1
+      );
       setStatus(
-        `${tool.name}を${placedItems.length}行配置${
+        `${tool.name}を${placedItems.length}行 / ${pageCount}ページ配置${
           skippedLineCount > 0 ? ` / 未配置${skippedLineCount}行` : ""
         }`
       );
@@ -2174,7 +2286,11 @@ export default function Home() {
     }
 
     const handlePointerMove = (event: PointerEvent) => {
-      const position = getPointerPosition(event.clientX, event.clientY);
+      const position = getPointerPositionForPage(
+        event.clientX,
+        event.clientY,
+        dragging.pageIndex
+      );
       updateItem(dragging.id, {
         x: clamp(position.x + dragging.offsetX, 3, 97),
         y: clamp(position.y + dragging.offsetY, 3, 97)
@@ -2193,7 +2309,7 @@ export default function Home() {
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
     };
-  }, [dragging, getPointerPosition, updateItem]);
+  }, [dragging, getPointerPositionForPage, updateItem]);
 
   useEffect(() => {
     if (!isAutoScrolling) {
@@ -2309,6 +2425,8 @@ export default function Home() {
       return;
     }
 
+    const pageIndex = Number(event.currentTarget.dataset.pageIndex ?? "0");
+
     if (!activeTool) {
       if (selectedId) {
         clearSelectionAndTool();
@@ -2357,11 +2475,19 @@ export default function Home() {
           return;
         }
 
-        const position = getPointerPosition(
+        const tapPageElement = getScorePageElement(pageIndex);
+        const positionOnPage = getPointerPositionInElement(
           pointerEvent.clientX,
-          pointerEvent.clientY
+          pointerEvent.clientY,
+          tapPageElement
         );
-        addItemAt(currentTap.toolId, position.x, position.y);
+        addItemAt(
+          currentTap.toolId,
+          positionOnPage.x,
+          positionOnPage.y,
+          undefined,
+          pageIndex
+        );
         setActiveTool("");
       };
 
@@ -2379,8 +2505,12 @@ export default function Home() {
       return;
     }
 
-    const position = getPointerPosition(event.clientX, event.clientY);
-    addItemAt(activeTool, position.x, position.y);
+    const position = getPointerPositionInElement(
+      event.clientX,
+      event.clientY,
+      event.currentTarget
+    );
+    addItemAt(activeTool, position.x, position.y, undefined, pageIndex);
   };
 
   const handleItemPointerDown = (
@@ -2389,9 +2519,15 @@ export default function Home() {
   ) => {
     event.stopPropagation();
     setSelectedId(item.id);
-    const position = getPointerPosition(event.clientX, event.clientY);
+    const pageIndex = getItemPageIndex(item);
+    const position = getPointerPositionForPage(
+      event.clientX,
+      event.clientY,
+      pageIndex
+    );
     setDragging({
       id: item.id,
+      pageIndex,
       offsetX: item.x - position.x,
       offsetY: item.y - position.y
     });
@@ -2404,8 +2540,13 @@ export default function Home() {
       return;
     }
 
-    const position = getPointerPosition(event.clientX, event.clientY);
-    addItemAt(value, position.x, position.y);
+    const pageIndex = Number(event.currentTarget.dataset.pageIndex ?? "0");
+    const position = getPointerPositionInElement(
+      event.clientX,
+      event.clientY,
+      event.currentTarget
+    );
+    addItemAt(value, position.x, position.y, undefined, pageIndex);
   };
 
   const addQuickChord = () => {
@@ -2427,9 +2568,9 @@ export default function Home() {
     parsedMidi.notes.slice(0, 420).forEach((note) => {
       const measurePosition = note.startTick / ticksPerMeasure;
       const rowIndex = Math.floor(measurePosition / measuresPerRow);
-      const system = SYSTEMS[rowIndex];
+      const system = getSystemForRow(rowIndex);
 
-      if (!system) {
+      if (rowIndex >= MAX_SHEET_ROWS) {
         ignoredNotes.count += 1;
         return;
       }
@@ -2441,6 +2582,7 @@ export default function Home() {
         label: midiPitchName(note.pitch),
         x: clamp(10 + (80 * positionInRow) / measuresPerRow, 8, 92),
         y: midiPitchToStaffY(note.pitch, rowIndex),
+        pageIndex: getRowPageIndex(rowIndex),
         size: noteTool.size,
         color: noteTool.color,
         pitch: note.pitch,
@@ -2467,8 +2609,8 @@ export default function Home() {
 
         const measurePosition = gridTick / ticksPerMeasure;
         const rowIndex = Math.floor(measurePosition / measuresPerRow);
-        const system = SYSTEMS[rowIndex];
-        if (!system) {
+        const system = getSystemForRow(rowIndex);
+        if (rowIndex >= MAX_SHEET_ROWS) {
           return;
         }
 
@@ -2488,6 +2630,7 @@ export default function Home() {
           label: chordName,
           x: clamp(10 + (80 * positionInRow) / measuresPerRow, 8, 92),
           y: system.top + 1.35,
+          pageIndex: getRowPageIndex(rowIndex),
           size: chordTool.size,
           color: chordTool.color
         });
@@ -2519,7 +2662,7 @@ export default function Home() {
 
     setItems((current) => {
       const noteCount = current.filter((item) => item.toolId === "note").length;
-      const rowIndex = Math.floor(noteCount / 16) % SYSTEMS.length;
+      const rowIndex = Math.floor(noteCount / 16) % MAX_SHEET_ROWS;
       const positionInRow = noteCount % 16;
       const noteItem: SheetItem = {
         id: createId(),
@@ -2527,6 +2670,7 @@ export default function Home() {
         label: midiPitchName(pitch),
         x: 10 + positionInRow * 5.2,
         y: midiPitchToStaffY(pitch, rowIndex),
+        pageIndex: getRowPageIndex(rowIndex),
         size: noteTool.size,
         color: noteTool.color,
         pitch
@@ -2859,17 +3003,10 @@ export default function Home() {
               name: "Aメロ1",
               rowIndex: 0,
               startRow: 0,
-              endRow: SYSTEMS.length - 1,
+              endRow: sheetPageCount * ROWS_PER_PAGE - 1,
               color: SECTION_COLORS[0]
             } satisfies SectionEntry
           ];
-
-    const getItemRowIndex = (item: SheetItem) => {
-      const rowIndex = SYSTEMS.findIndex(
-        (system) => item.y >= system.top && item.y <= system.top + system.height
-      );
-      return rowIndex >= 0 ? rowIndex : 0;
-    };
 
     const getLyricsForSection = (section: SectionEntry) => {
       const startRow = getSectionStartRow(section);
@@ -2877,7 +3014,7 @@ export default function Home() {
       const rows = new Map<number, SheetItem[]>();
 
       lyricItems.forEach((item) => {
-        const rowIndex = getItemRowIndex(item);
+        const rowIndex = getItemGlobalRowIndex(item);
         if (rowIndex < startRow || rowIndex > endRow) {
           return;
         }
@@ -3621,149 +3758,157 @@ export default function Home() {
           </div>
 
           <div ref={scoreStageRef} className="score-stage">
-            <div
-              ref={sheetRef}
-              className={`score-page layout-${sheetLayoutMode} ${
-                showChords ? "" : "hide-chords"
-              }`}
-              onPointerDown={handleSheetPointerDown}
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={handleDrop}
-            >
-              <div className="page-meta">
-                <strong>{meta.title || "Untitled"}</strong>
-                <span>{meta.vocalist || "Vocal"}</span>
-                <span>Key {meta.key || "-"}</span>
-                <span>{meta.tempo || "-"} BPM</span>
-              </div>
+            {sheetPages.map((pageIndex) => (
+              <div
+                key={pageIndex}
+                ref={pageIndex === 0 ? sheetRef : undefined}
+                data-page-index={pageIndex}
+                className={`score-page layout-${sheetLayoutMode} ${
+                  showChords ? "" : "hide-chords"
+                }`}
+                onPointerDown={handleSheetPointerDown}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={handleDrop}
+              >
+                <div className="page-meta">
+                  <strong>{meta.title || "Untitled"}</strong>
+                  <span>{meta.vocalist || "Vocal"}</span>
+                  <span>Key {meta.key || "-"}</span>
+                  <span>{meta.tempo || "-"} BPM</span>
+                  {sheetPageCount > 1 && <span>{pageIndex + 1} / {sheetPageCount}</span>}
+                </div>
 
-              {(isAutoScrolling || autoScrollElapsed > 0) && (
-                <div
-                  className={`auto-scroll-guide ${
-                    isAutoScrolling ? "running" : ""
-                  }`}
-                  style={{ top: `${autoScrollGuideTop}%` }}
-                  aria-hidden="true"
-                />
-              )}
-
-              {SYSTEMS.map((system, systemIndex) => (
-                (() => {
-                  const sectionSlot = sectionByRow.get(systemIndex);
-                  const sectionLabel = sectionSlot
-                    ? `${sectionSlot.section.name}${
-                        sectionSlot.rowTotal > 1
-                          ? ` ${sectionSlot.rowPart}/${sectionSlot.rowTotal}`
-                          : ""
-                      }`
-                    : `${systemIndex + 1}`;
-                  const measureLabel = sectionSlot
-                    ? [
-                        sectionSlot.section.startMeasure
-                          ? `${sectionSlot.section.startMeasure}小節`
-                          : "",
-                        sectionSlot.section.recordingStartMeasure
-                          ? `録${sectionSlot.section.recordingStartMeasure}`
-                          : ""
-                      ]
-                        .filter(Boolean)
-                        .join(" / ")
-                    : "";
-
-                  return (
-                    <div
-                      key={systemIndex}
-                      className="system"
-                      style={{
-                        top: `${system.top}%`,
-                        height: `${system.height}%`
-                      }}
-                    >
-                      <div className="phrase-row-header">
-                        <span
-                          className="section-cell"
-                          style={
-                            {
-                              "--section-color":
-                                sectionSlot?.section.color ?? "#0891b2"
-                            } as CSSProperties
-                          }
-                        >
-                          <strong>{sectionLabel}</strong>
-                          {measureLabel && <small>{measureLabel}</small>}
-                        </span>
-                        <span>コード</span>
-                      </div>
-                      <div className="staff-lines" aria-hidden="true">
-                        {[0, 1, 2, 3, 4].map((lineIndex) => (
-                          <span
-                            key={lineIndex}
-                            style={{ "--line-index": lineIndex } as CSSProperties}
-                          />
-                        ))}
-                      </div>
-                      <div className="note-writing-lane" aria-hidden="true" />
-                      <div className="lyric-writing-lane" aria-hidden="true" />
-                    </div>
-                  );
-                })()
-              ))}
-
-              {items.map((item) => {
-                if (!showChords && item.toolId === "chord") {
-                  return null;
-                }
-
-                const tool = TOOL_BY_ID[item.toolId];
-                const displayLabel = getItemDisplayLabel(item);
-                const itemStyle = {
-                  left: `${item.x}%`,
-                  top: `${item.y}%`,
-                  fontSize: `${item.size}px`,
-                  "--item-color": item.color,
-                  "--highlight-color": item.highlightColor ?? "transparent",
-                  ...(item.width
-                    ? {
-                        width: `${item.width}%`,
-                        maxWidth: `${item.width}%`
-                      }
-                    : {}),
-                  textAlign: item.align ?? "center"
-                } as CSSProperties;
-
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    className={`sheet-item sheet-${tool.kind} tool-${item.toolId} align-${
-                      item.align ?? "center"
-                    } ${
-                      selectedId === item.id ? "selected" : ""
-                    } ${item.highlightColor ? "has-highlight" : ""} ${
-                      item.comment ? "has-comment" : ""
+                {pageIndex === 0 && (isAutoScrolling || autoScrollElapsed > 0) && (
+                  <div
+                    className={`auto-scroll-guide ${
+                      isAutoScrolling ? "running" : ""
                     }`}
-                    style={itemStyle}
-                    onPointerDown={(event) => handleItemPointerDown(event, item)}
-                    onDoubleClick={() => {
-                      const nextLabel = window.prompt("表示", item.label);
-                      if (nextLabel !== null) {
-                        updateItem(item.id, { label: nextLabel });
-                      }
-                    }}
-                    title={tool.name}
-                  >
-                    <span className="item-content">
-                      {renderToolGlyph(item.toolId, displayLabel)}
-                    </span>
-                    {item.comment && (
-                      <span className="comment-badge" title={item.comment}>
-                        <MessageSquare size={10} />
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
+                    style={{ top: `${autoScrollGuideTop}%` }}
+                    aria-hidden="true"
+                  />
+                )}
+
+                {SYSTEMS.map((system, systemIndex) => (
+                  (() => {
+                    const rowIndex = pageIndex * ROWS_PER_PAGE + systemIndex;
+                    const sectionSlot = sectionByRow.get(rowIndex);
+                    const sectionLabel = sectionSlot
+                      ? `${sectionSlot.section.name}${
+                          sectionSlot.rowTotal > 1
+                            ? ` ${sectionSlot.rowPart}/${sectionSlot.rowTotal}`
+                            : ""
+                        }`
+                      : `${rowIndex + 1}`;
+                    const measureLabel = sectionSlot
+                      ? [
+                          sectionSlot.section.startMeasure
+                            ? `${sectionSlot.section.startMeasure}小節`
+                            : "",
+                          sectionSlot.section.recordingStartMeasure
+                            ? `録${sectionSlot.section.recordingStartMeasure}`
+                            : ""
+                        ]
+                          .filter(Boolean)
+                          .join(" / ")
+                      : "";
+
+                    return (
+                      <div
+                        key={systemIndex}
+                        className="system"
+                        style={{
+                          top: `${system.top}%`,
+                          height: `${system.height}%`
+                        }}
+                      >
+                        <div className="phrase-row-header">
+                          <span
+                            className="section-cell"
+                            style={
+                              {
+                                "--section-color":
+                                  sectionSlot?.section.color ?? "#0891b2"
+                              } as CSSProperties
+                            }
+                          >
+                            <strong>{sectionLabel}</strong>
+                            {measureLabel && <small>{measureLabel}</small>}
+                          </span>
+                          <span>コード</span>
+                        </div>
+                        <div className="staff-lines" aria-hidden="true">
+                          {[0, 1, 2, 3, 4].map((lineIndex) => (
+                            <span
+                              key={lineIndex}
+                              style={{ "--line-index": lineIndex } as CSSProperties}
+                            />
+                          ))}
+                        </div>
+                        <div className="note-writing-lane" aria-hidden="true" />
+                        <div className="lyric-writing-lane" aria-hidden="true" />
+                      </div>
+                    );
+                  })()
+                ))}
+
+                {items
+                  .filter((item) => getItemPageIndex(item) === pageIndex)
+                  .map((item) => {
+                    if (!showChords && item.toolId === "chord") {
+                      return null;
+                    }
+
+                    const tool = TOOL_BY_ID[item.toolId];
+                    const displayLabel = getItemDisplayLabel(item);
+                    const itemStyle = {
+                      left: `${item.x}%`,
+                      top: `${item.y}%`,
+                      fontSize: `${item.size}px`,
+                      "--item-color": item.color,
+                      "--highlight-color": item.highlightColor ?? "transparent",
+                      ...(item.width
+                        ? {
+                            width: `${item.width}%`,
+                            maxWidth: `${item.width}%`
+                          }
+                        : {}),
+                      textAlign: item.align ?? "center"
+                    } as CSSProperties;
+
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className={`sheet-item sheet-${tool.kind} tool-${item.toolId} align-${
+                          item.align ?? "center"
+                        } ${
+                          selectedId === item.id ? "selected" : ""
+                        } ${item.highlightColor ? "has-highlight" : ""} ${
+                          item.comment ? "has-comment" : ""
+                        }`}
+                        style={itemStyle}
+                        onPointerDown={(event) => handleItemPointerDown(event, item)}
+                        onDoubleClick={() => {
+                          const nextLabel = window.prompt("表示", item.label);
+                          if (nextLabel !== null) {
+                            updateItem(item.id, { label: nextLabel });
+                          }
+                        }}
+                        title={tool.name}
+                      >
+                        <span className="item-content">
+                          {renderToolGlyph(item.toolId, displayLabel)}
+                        </span>
+                        {item.comment && (
+                          <span className="comment-badge" title={item.comment}>
+                            <MessageSquare size={10} />
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+              </div>
+            ))}
           </div>
         </section>
 
@@ -4028,7 +4173,7 @@ export default function Home() {
                       setSectionEndRow((current) => Math.max(current, nextRow));
                     }}
                   >
-                    {SYSTEMS.map((_, rowIndex) => (
+                    {sectionRowOptions.map((rowIndex) => (
                       <option key={rowIndex} value={rowIndex}>
                         開始 {rowIndex + 1}
                       </option>
@@ -4039,7 +4184,7 @@ export default function Home() {
                     value={sectionEndRow}
                     onChange={(event) => setSectionEndRow(Number(event.target.value))}
                   >
-                    {SYSTEMS.map((_, rowIndex) => (
+                    {sectionRowOptions.map((rowIndex) => (
                       <option key={rowIndex} value={rowIndex}>
                         終了 {rowIndex + 1}
                       </option>
