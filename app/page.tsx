@@ -1893,11 +1893,11 @@ export default function Home() {
 
       const fallback = lyricDisplayFallbacks.get(item.id);
       const originalLabel = item.originalLabel ?? fallback?.original ?? item.label;
-      // readingLyrics テキスト（ユーザーが直接編集・保存できる）を優先し、
-      // 配置時に生成した readingLabel はフォールバックとして使う
+      // 譜面上で直接編集した readingLabel を優先（再起動後も保持される）
+      // 未編集の場合は readingLyrics テキスト（fallback）を使う
       const readingLabel =
-        fallback?.reading ??
         item.readingLabel ??
+        fallback?.reading ??
         roughHiragana(originalLabel, readingCorrectionEntries);
       const vowelLabel = item.vowelLabel ?? fallback?.vowel ?? toVowels(readingLabel);
 
@@ -2314,13 +2314,21 @@ export default function Home() {
         return item.label;
       }
 
+      // 表示モードに合わせて編集対象を返す
+      // ひらがなモード → 読み（hiragana）を編集
+      // 母音モード → 母音テキストを編集
+      // 原文モード → 原文を編集
+      if (lyricDisplayMode === "reading" || lyricDisplayMode === "vowel") {
+        return getItemDisplayLabel(item);
+      }
+
       return (
         item.originalLabel ??
         lyricDisplayFallbacks.get(item.id)?.original ??
         item.label
       );
     },
-    [lyricDisplayFallbacks]
+    [getItemDisplayLabel, lyricDisplayFallbacks, lyricDisplayMode]
   );
 
   const updateItemLabel = useCallback(
@@ -2335,6 +2343,21 @@ export default function Home() {
             return { ...item, label };
           }
 
+          // ひらがなモードで編集 → readingLabel だけ更新（原文はそのまま）
+          if (lyricDisplayMode === "reading") {
+            return {
+              ...item,
+              readingLabel: label,
+              vowelLabel: toVowels(label)
+            };
+          }
+
+          // 母音モードで編集 → vowelLabel だけ更新
+          if (lyricDisplayMode === "vowel") {
+            return { ...item, vowelLabel: label };
+          }
+
+          // 原文モードで編集 → 原文を更新してreadings再生成
           const readingLabel = roughHiragana(label, readingCorrectionEntries);
           return {
             ...item,
@@ -2346,7 +2369,7 @@ export default function Home() {
         })
       );
     },
-    [readingCorrectionEntries]
+    [lyricDisplayMode, readingCorrectionEntries]
   );
 
   const removeSelected = useCallback(() => {
