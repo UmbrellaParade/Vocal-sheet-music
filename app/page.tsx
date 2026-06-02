@@ -422,7 +422,7 @@ const ALL_SHEET_TOOLS: ToolSpec[] = [
   {
     id: "marker",
     name: "メモ印",
-    label: "A",
+    label: "※",
     shortcut: "M",
     color: "#fb923c",
     size: 18,
@@ -2562,7 +2562,18 @@ export default function Home() {
       const placedItems: SheetItem[] = [];
       let variantIndex = 0;
 
-      // 1行分のアイテムを生成（スペース区切りなら単語ごとに分割）
+      // 行テキストをトークン（単語または1文字）に分割するヘルパー
+      // スペースあり → 単語分割、なし → 1文字ずつ（個別マーキング可能）
+      const tokenizeLine = (text: string): string[] => {
+        const spaceTokens = text.split(/[ 　]+/).filter(Boolean);
+        if (spaceTokens.length > 1) {
+          return spaceTokens; // スペースで単語分割
+        }
+        // スペースなし → Unicode文字単位で1文字ずつ
+        return [...text].filter((ch) => ch.trim().length > 0);
+      };
+
+      // 1行分のアイテムを生成（1文字ずつ個別アイテムにして単語単位でマーキング可能）
       const createPlacedLineItems = (line: string, rowIndex: number): SheetItem[] => {
         const system = getSystemForRow(rowIndex);
         const variant = variants[variantIndex] ?? {};
@@ -2570,55 +2581,53 @@ export default function Home() {
         const yPos = getLyricPlacementY(system, toolId, sheetLayoutMode);
         const pageIdx = getRowPageIndex(rowIndex);
 
-        const words = line.split(/[ 　]+/).filter(Boolean);
+        const srcLine = toolId === "lyric" ? (variant.original ?? line) : line;
+        const tokens = tokenizeLine(srcLine);
 
-        if (words.length <= 1) {
-          // スペースなし → 1アイテム（従来どおり行全体）
-          const label = toolId === "lyric" ? variant.original ?? line : line;
+        if (tokens.length <= 1) {
+          // 1文字 or 空 → 1アイテム
+          const label = srcLine || line;
+          // 1文字の場合も readingLabel/vowelLabel を文字から直接設定
+          const reading = toolId === "lyric" ? (variant.reading ?? label) : label;
           return [{
             id: createId(),
             toolId,
             label,
             originalLabel: toolId === "lyric" ? label : undefined,
-            readingLabel: toolId === "lyric" ? variant.reading : undefined,
-            vowelLabel: toolId === "lyric" ? variant.vowel : undefined,
-            x: LYRIC_LINE_X,
+            readingLabel: toolId === "lyric" ? reading : undefined,
+            vowelLabel: toolId === "lyric" ? toVowels(reading) : undefined,
+            x: LYRIC_LINE_X + LYRIC_LINE_WIDTH / 2,
             y: yPos,
             pageIndex: pageIdx,
             size: tool.size,
-            color: tool.color,
-            width: LYRIC_LINE_WIDTH,
-            align: "left"
+            color: tool.color
           }];
         }
 
-        // スペースあり → 単語ごとに分割して横並び配置
-        const origWords = (variant.original ?? line).split(/[ 　]+/).filter(Boolean);
-        const readingWords = (variant.reading ?? "").split(/[ 　]+/).filter(Boolean);
-        const vowelWords = (variant.vowel ?? "").split(/[ 　]+/).filter(Boolean);
-        const totalChars = words.reduce((sum, w) => sum + w.length, 0) || 1;
-        let charsSoFar = 0;
+        // 複数トークン → 均等横並び配置
+        // reading も同じルールでトークン化して1:1対応させる
+        const readingTokens = tokenizeLine(variant.reading ?? srcLine);
+        const vowelTokens = tokenizeLine(variant.vowel ?? "");
+        const totalLen = tokens.length;
 
-        return words.map((word, wi) => {
-          // 文字数に比例した中心X座標
-          const x = LYRIC_LINE_X +
-            LYRIC_LINE_WIDTH * (charsSoFar + word.length / 2) / totalChars;
-          charsSoFar += word.length;
-          const label = toolId === "lyric" ? (origWords[wi] ?? word) : word;
+        return tokens.map((token, ti) => {
+          // 各トークンの中心X座標（等間隔）
+          const x = LYRIC_LINE_X + LYRIC_LINE_WIDTH * (ti + 0.5) / totalLen;
+          const reading = readingTokens[ti] ?? token;
+          const vowel = vowelTokens[ti] || toVowels(reading);
 
           return {
             id: createId(),
             toolId,
-            label,
-            originalLabel: toolId === "lyric" ? label : undefined,
-            readingLabel: toolId === "lyric" ? (readingWords[wi] || undefined) : undefined,
-            vowelLabel: toolId === "lyric" ? (vowelWords[wi] || undefined) : undefined,
+            label: token,
+            originalLabel: toolId === "lyric" ? token : undefined,
+            readingLabel: toolId === "lyric" ? reading : undefined,
+            vowelLabel: toolId === "lyric" ? vowel : undefined,
             x,
             y: yPos,
             pageIndex: pageIdx,
             size: tool.size,
             color: tool.color
-            // width なし → 中央揃えで単語サイズに自動フィット
           };
         });
       };
