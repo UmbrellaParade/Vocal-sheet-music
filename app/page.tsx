@@ -1362,6 +1362,10 @@ function isToolId(value: string): value is ToolId {
   return value in TOOL_BY_ID;
 }
 
+function isSheetLyricItem(item: SheetItem) {
+  return item.toolId === "lyric" || item.toolId === "vowel";
+}
+
 function normalizeDraftItems(items: SheetItem[]) {
   return items.map((item) => {
     const tool = TOOL_BY_ID[item.toolId];
@@ -1502,6 +1506,7 @@ export default function Home() {
   const [items, setItems] = useState<SheetItem[]>([]);
   const [activeTool, setActiveTool] = useState<ToolId | "">("");
   const [selectedId, setSelectedId] = useState<string>("");
+  const [editingItemId, setEditingItemId] = useState<string>("");
   const [dragging, setDragging] = useState<{
     id: string;
     pageIndex: number;
@@ -1862,14 +1867,24 @@ export default function Home() {
 
   const clearSelectionAndTool = useCallback(() => {
     setSelectedId("");
+    setEditingItemId("");
     setActiveTool("");
     setStatus("選択を解除");
+  }, []);
+
+  const startInlineEdit = useCallback((itemId: string) => {
+    setSelectedId(itemId);
+    setActiveTool("");
+    setDragging(null);
+    setEditingItemId(itemId);
+    setStatus("歌詞を編集中");
   }, []);
 
   const selectTool = useCallback(
     (toolId: ToolId) => {
       const shouldClear = activeTool === toolId;
       setSelectedId("");
+      setEditingItemId("");
       setActiveTool(shouldClear ? "" : toolId);
       setStatus(
         shouldClear ? "記号選択を解除" : `${TOOL_BY_ID[toolId].name}を選択`
@@ -1907,6 +1922,7 @@ export default function Home() {
     setIsAutoScrolling(false);
     setAutoScrollElapsed(0);
     setSelectedId("");
+    setEditingItemId("");
   }, []);
 
   const saveDraft = useCallback(() => {
@@ -1938,6 +1954,7 @@ export default function Home() {
 
     setItems((current) => current.filter((item) => item.id !== selectedId));
     setSelectedId("");
+    setEditingItemId("");
     setStatus("削除しました");
   }, [selectedId]);
 
@@ -2202,6 +2219,7 @@ export default function Home() {
 
     setItems([]);
     setSelectedId("");
+    setEditingItemId("");
     setStatus("譜面を空にしました");
   }, []);
 
@@ -2406,6 +2424,7 @@ export default function Home() {
       if (match) {
         event.preventDefault();
         setSelectedId("");
+        setEditingItemId("");
         setActiveTool(match.id);
         setStatus(`${match.name}を選択`);
       }
@@ -2519,6 +2538,14 @@ export default function Home() {
   ) => {
     event.stopPropagation();
     setSelectedId(item.id);
+    setEditingItemId("");
+
+    if (isSheetLyricItem(item)) {
+      setActiveTool("");
+      setDragging(null);
+      return;
+    }
+
     const pageIndex = getItemPageIndex(item);
     const position = getPointerPositionForPage(
       event.clientX,
@@ -3860,6 +3887,9 @@ export default function Home() {
 
                     const tool = TOOL_BY_ID[item.toolId];
                     const displayLabel = getItemDisplayLabel(item);
+                    const isEditableSheetText = isSheetLyricItem(item);
+                    const isInlineEditing =
+                      editingItemId === item.id && isEditableSheetText;
                     const itemStyle = {
                       left: `${item.x}%`,
                       top: `${item.y}%`,
@@ -3874,27 +3904,74 @@ export default function Home() {
                         : {}),
                       textAlign: item.align ?? "center"
                     } as CSSProperties;
+                    const sheetItemClassName = `sheet-item sheet-${tool.kind} tool-${
+                      item.toolId
+                    } align-${item.align ?? "center"} ${
+                      selectedId === item.id ? "selected" : ""
+                    } ${item.highlightColor ? "has-highlight" : ""} ${
+                      item.comment ? "has-comment" : ""
+                    }`;
+
+                    if (isInlineEditing) {
+                      return (
+                        <textarea
+                          key={item.id}
+                          className={`sheet-inline-editor ${sheetItemClassName}`}
+                          style={itemStyle}
+                          value={item.label}
+                          rows={Math.min(
+                            8,
+                            Math.max(2, item.label.split(/\r?\n/).length)
+                          )}
+                          autoFocus
+                          onPointerDown={(event) => event.stopPropagation()}
+                          onClick={(event) => event.stopPropagation()}
+                          onChange={(event) =>
+                            updateItem(item.id, { label: event.target.value })
+                          }
+                          onBlur={() => {
+                            setEditingItemId("");
+                            setStatus("歌詞を更新");
+                          }}
+                          onKeyDown={(event) => {
+                            if (
+                              event.key === "Escape" ||
+                              ((event.ctrlKey || event.metaKey) &&
+                                event.key === "Enter")
+                            ) {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              setEditingItemId("");
+                            }
+                          }}
+                          aria-label="譜面上の歌詞を編集"
+                        />
+                      );
+                    }
 
                     return (
                       <button
                         key={item.id}
                         type="button"
-                        className={`sheet-item sheet-${tool.kind} tool-${item.toolId} align-${
-                          item.align ?? "center"
-                        } ${
-                          selectedId === item.id ? "selected" : ""
-                        } ${item.highlightColor ? "has-highlight" : ""} ${
-                          item.comment ? "has-comment" : ""
-                        }`}
+                        className={sheetItemClassName}
                         style={itemStyle}
                         onPointerDown={(event) => handleItemPointerDown(event, item)}
                         onDoubleClick={() => {
+                          if (isEditableSheetText) {
+                            startInlineEdit(item.id);
+                            return;
+                          }
+
                           const nextLabel = window.prompt("表示", item.label);
                           if (nextLabel !== null) {
                             updateItem(item.id, { label: nextLabel });
                           }
                         }}
-                        title={tool.name}
+                        title={
+                          isEditableSheetText
+                            ? `${tool.name}: ダブルクリックで編集`
+                            : tool.name
+                        }
                       >
                         <span className="item-content">
                           {renderToolGlyph(item.toolId, displayLabel)}
@@ -4454,6 +4531,10 @@ export default function Home() {
         <div
           className={`mobile-selection-bar ${
             selectedItem ? "" : "mobile-tool-bar"
+          } ${
+            selectedItem && isSheetLyricItem(selectedItem)
+              ? "mobile-editable-bar"
+              : ""
           }`}
           aria-label={selectedItem ? "選択中の操作" : "記号選択中の操作"}
         >
@@ -4472,6 +4553,16 @@ export default function Home() {
           >
             解除
           </button>
+          {selectedItem && isSheetLyricItem(selectedItem) && (
+            <button
+              type="button"
+              className="mobile-selection-edit"
+              onClick={() => startInlineEdit(selectedItem.id)}
+            >
+              <Type size={17} />
+              <span>編集</span>
+            </button>
+          )}
           {selectedItem && (
             <button
               type="button"

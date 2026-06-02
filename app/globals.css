@@ -1287,6 +1287,53 @@ kbd {
   color: #0891b2;
 }
 
+.sheet-text.tool-lyric,
+.sheet-text.tool-vowel {
+  cursor: text;
+  touch-action: manipulation;
+}
+
+.sheet-text.tool-lyric:active,
+.sheet-text.tool-vowel:active {
+  cursor: text;
+}
+
+.sheet-inline-editor {
+  z-index: 12;
+  min-width: 150px;
+  min-height: 54px;
+  padding: 6px 8px;
+  border: 1px solid var(--focus);
+  border-radius: 6px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow:
+    0 0 0 3px rgba(250, 204, 21, 0.22),
+    0 12px 28px rgba(15, 23, 42, 0.18);
+  cursor: text;
+  font-family: inherit;
+  font-weight: 700;
+  line-height: 1.32;
+  outline: none;
+  overflow: auto;
+  resize: vertical;
+  text-shadow: none;
+  touch-action: auto;
+  white-space: pre-wrap;
+  -webkit-text-stroke: 0;
+}
+
+.sheet-inline-editor.align-left {
+  transform: translateY(-50%);
+}
+
+.sheet-inline-editor:focus {
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 3px rgba(8, 145, 178, 0.18),
+    0 12px 28px rgba(15, 23, 42, 0.18);
+}
+
 .sheet-text.tool-dynamic,
 .sheet-text.tool-marker {
   color: var(--item-color);
@@ -1749,6 +1796,10 @@ kbd {
     transform: translateY(-72%);
   }
 
+  .score-page .sheet-inline-editor.align-left {
+    transform: translateY(-50%);
+  }
+
   .score-page .sheet-text.tool-lyric {
     font-size: clamp(11.5px, 3.2vw, 13px) !important;
     line-height: 1.26;
@@ -1793,6 +1844,10 @@ kbd {
     grid-template-columns: minmax(0, 1fr) auto;
   }
 
+  .mobile-editable-bar {
+    grid-template-columns: minmax(0, 1fr) auto auto auto;
+  }
+
   .mobile-selection-summary {
     min-width: 0;
     display: grid;
@@ -1813,6 +1868,7 @@ kbd {
   }
 
   .mobile-selection-clear,
+  .mobile-selection-edit,
   .mobile-selection-delete {
     min-height: 42px;
     display: inline-flex;
@@ -1829,6 +1885,13 @@ kbd {
     border: 1px solid var(--line);
     color: var(--muted);
     background: #fff;
+  }
+
+  .mobile-selection-edit {
+    padding: 0 12px;
+    border: 0;
+    color: #fff;
+    background: var(--accent);
   }
 
   .mobile-selection-delete {
