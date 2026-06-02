@@ -1659,6 +1659,7 @@ export default function Home() {
   const [meta, setMeta] = useState<SheetMeta>(DEFAULT_META);
   const [items, setItems] = useState<SheetItem[]>([]);
   const [activeTool, setActiveTool] = useState<ToolId | "">("");
+  const [activeHighlightColor, setActiveHighlightColor] = useState<string>("");
   const [selectedId, setSelectedId] = useState<string>("");
   const [editingItemId, setEditingItemId] = useState<string>("");
   const [dragging, setDragging] = useState<{
@@ -2107,6 +2108,7 @@ export default function Home() {
     setSelectedId("");
     setEditingItemId("");
     setActiveTool("");
+    setActiveHighlightColor("");
     setStatus("選択を解除");
   }, []);
 
@@ -2118,12 +2120,26 @@ export default function Home() {
     setStatus("歌詞を編集中");
   }, []);
 
+  // ハイライト色を選択（同じ色で再クリックするとOFF）
+  const selectHighlightColor = useCallback(
+    (color: string) => {
+      const next = activeHighlightColor === color ? "" : color;
+      setActiveHighlightColor(next);
+      setActiveTool("");
+      setSelectedId("");
+      setEditingItemId("");
+      setStatus(next ? "マーキングモード ON" : "マーキングモード OFF");
+    },
+    [activeHighlightColor]
+  );
+
   const selectTool = useCallback(
     (toolId: ToolId) => {
       const shouldClear = activeTool === toolId;
       setSelectedId("");
       setEditingItemId("");
       setActiveTool(shouldClear ? "" : toolId);
+      setActiveHighlightColor("");
       setStatus(
         shouldClear ? "記号選択を解除" : `${TOOL_BY_ID[toolId].name}を選択`
       );
@@ -3099,6 +3115,11 @@ export default function Home() {
       return;
     }
 
+    // ハイライトモード中は空白クリックで何もしない
+    if (activeHighlightColor) {
+      return;
+    }
+
     const pageIndex = Number(event.currentTarget.dataset.pageIndex ?? "0");
 
     if (!activeTool) {
@@ -3192,6 +3213,16 @@ export default function Home() {
     item: SheetItem
   ) => {
     event.stopPropagation();
+
+    // ハイライトモードがONのとき → 歌詞アイテムに色を塗る（ドラッグ・選択はしない）
+    if (activeHighlightColor && isSheetLyricItem(item)) {
+      // 同じ色をもう一度タップするとハイライト解除
+      const next =
+        item.highlightColor === activeHighlightColor ? "" : activeHighlightColor;
+      updateItem(item.id, { highlightColor: next });
+      return;
+    }
+
     setSelectedId(item.id);
     setEditingItemId("");
 
@@ -4883,14 +4914,45 @@ export default function Home() {
             </button>
             {!collapsedPanels.tools && (
               <>
-                {activeToolSpec && (
+                {/* マーキング（ハイライトペン）パレット */}
+                <div className="highlight-palette-row">
+                  <span className="highlight-palette-label">マーキング</span>
+                  <div className="highlight-palette-swatches">
+                    {HIGHLIGHT_SWATCHES.map((color) => (
+                      <button
+                        key={color}
+                        type="button"
+                        className={`highlight-pen-button ${activeHighlightColor === color ? "active" : ""}`}
+                        style={{ backgroundColor: color }}
+                        onClick={() => selectHighlightColor(color)}
+                        title={`マーキング: ${color}`}
+                        aria-pressed={activeHighlightColor === color}
+                      />
+                    ))}
+                    {activeHighlightColor && (
+                      <button
+                        type="button"
+                        className="highlight-pen-clear"
+                        onClick={() => setActiveHighlightColor("")}
+                        title="マーキング解除"
+                      >
+                        <X size={13} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {(activeToolSpec || activeHighlightColor) && (
                   <button
                     type="button"
                     className="tool-clear-button"
-                    onClick={clearActiveTool}
+                    onClick={() => {
+                      clearActiveTool();
+                      setActiveHighlightColor("");
+                    }}
                   >
                     <X size={16} />
-                    <span>記号選択を解除</span>
+                    <span>選択を解除</span>
                   </button>
                 )}
                 <div className="tool-grid">

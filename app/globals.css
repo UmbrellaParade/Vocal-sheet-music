@@ -455,6 +455,69 @@ button:focus-visible {
   font-weight: 700;
 }
 
+.highlight-palette-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.highlight-palette-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.highlight-palette-swatches {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.highlight-pen-button {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: transform 0.1s, border-color 0.1s;
+}
+
+.highlight-pen-button:hover {
+  transform: scale(1.15);
+  border-color: #94a3b8;
+}
+
+.highlight-pen-button.active {
+  border-color: #1e40af;
+  box-shadow: 0 0 0 2px #bfdbfe;
+  transform: scale(1.1);
+}
+
+.highlight-pen-clear {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1.5px solid #cbd5e1;
+  background: #fff;
+  color: #64748b;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+
+.highlight-pen-clear:hover {
+  background: #fee2e2;
+  border-color: #fca5a5;
+  color: #dc2626;
+}
+
 .tool-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
