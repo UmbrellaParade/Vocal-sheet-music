@@ -2470,13 +2470,35 @@ export default function Home() {
     async (text: string): Promise<ReadingResult> => {
       const blocks = parseSectionedLyrics(text);
       if (!blocks.length) {
-        return requestReading(text);
+        // セクションなしの場合も行ごとに変換して改行を確実に保持する
+        const lines = splitLinesForPlacement(text);
+        if (lines.length <= 1) {
+          return requestReading(text);
+        }
+        const lineResults = await Promise.all(lines.map((line) => requestReading(line)));
+        return {
+          reading: lineResults.map((r) => r.reading).join("\n"),
+          source: lineResults.some((r) => r.source === "fallback")
+            ? "fallback"
+            : lineResults.some((r) => r.source === "browser-kuromoji")
+              ? "browser-kuromoji"
+              : "kuromoji"
+        };
       }
 
+      // 各行を個別に変換する（kuroshiro が改行を保持しない場合があるため）
       const convertedBlocks = await Promise.all(
         blocks.map(async (block) => {
-          const result = await requestReading(block.lines.join("\n"));
-          return { ...result, label: block.label };
+          const lineResults = await Promise.all(
+            block.lines.map((line) => requestReading(line))
+          );
+          const reading = lineResults.map((r) => r.reading).join("\n");
+          const source = lineResults.some((r) => r.source === "fallback")
+            ? "fallback"
+            : lineResults.some((r) => r.source === "browser-kuromoji")
+              ? "browser-kuromoji"
+              : "kuromoji";
+          return { reading, source, label: block.label };
         })
       );
 
