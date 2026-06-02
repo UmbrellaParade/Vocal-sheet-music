@@ -2663,9 +2663,30 @@ export default function Home() {
 
     try {
       const data = await convertTextToReadingPreservingSections(sourceLyrics);
-      setReadingLyrics(data.reading);
-      // 古い readingLabel（カタカナがひらがなに潰れたものなど）をクリアして
-      // 新しい readingLyrics の内容を正しく反映させる
+
+      // 譜面上で手動修正済みの readingLabel を新しい変換結果にマージする
+      // （手動修正した行はそのまま保持、未修正行は新しい変換結果を使う）
+      const sortedLyricItems = items
+        .filter((item) => item.toolId === "lyric")
+        .slice()
+        .sort(
+          (a, b) =>
+            getItemGlobalRowIndex(a) - getItemGlobalRowIndex(b) || a.x - b.x
+        );
+
+      let mergedReading = data.reading;
+      sortedLyricItems.forEach((item, index) => {
+        if (item.readingLabel != null) {
+          mergedReading = updateReadingLyricsLine(
+            mergedReading,
+            index,
+            item.readingLabel
+          );
+        }
+      });
+
+      setReadingLyrics(mergedReading);
+      // readingLabel をクリアして readingLyrics を正とする
       setItems((current) =>
         current.map((item) =>
           item.toolId === "lyric"
@@ -2684,7 +2705,7 @@ export default function Home() {
     } finally {
       setIsConverting(false);
     }
-  }, [convertTextToReadingPreservingSections, readingCorrectionEntries, sourceLyrics]);
+  }, [convertTextToReadingPreservingSections, items, readingCorrectionEntries, sourceLyrics]);
 
   const convertReadingToVowels = useCallback(async () => {
     setIsConverting(true);
